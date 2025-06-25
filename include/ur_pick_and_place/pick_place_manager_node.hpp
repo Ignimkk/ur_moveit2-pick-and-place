@@ -28,7 +28,6 @@ private:
   
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pick_goal_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr place_goal_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr trigger_sub_;
   
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   
@@ -37,11 +36,9 @@ private:
   
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void triggerCallback(const std_msgs::msg::String::SharedPtr msg);
   
   void sendPickGoal();
   void sendPlaceGoal();
-  void executePickAndPlaceSequence();
   
   void pickGoalResponseCallback(const GoalHandlePick::SharedPtr & goal_handle);
   void pickFeedbackCallback(

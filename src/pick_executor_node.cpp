@@ -21,10 +21,10 @@ PickExecutorNode::PickExecutorNode(const rclcpp::NodeOptions & options)
     std::bind(&PickExecutorNode::handleCancel, this, std::placeholders::_1),
     std::bind(&PickExecutorNode::handleAccepted, this, std::placeholders::_1));
     
-  // 목표 수신 구독자
-  goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/internal/pick_goal", 10,
-    std::bind(&PickExecutorNode::goalCallback, this, std::placeholders::_1));
+  // 목표 수신 구독자 (직접 토픽 처리 비활성화 - manager를 통해서만 실행)
+  // goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+  //   "/internal/pick_goal", 10,
+  //   std::bind(&PickExecutorNode::goalCallback, this, std::placeholders::_1));
     
   // Gripper 클라이언트
   gripper_client_ = this->create_client<ur_pick_and_place::srv::GripperControl>("/gripper/control");
@@ -42,7 +42,7 @@ void PickExecutorNode::setupMoveGroup()
   planning_scene_interface_ = std::make_unique<moveit::planning_interface::PlanningSceneInterface>();
   
   // 플래너 설정
-  move_group_arm_->setPlannerId("RRTConnect");
+  move_group_arm_->setPlannerId("RRTstar");//RRTConnect
   move_group_arm_->setPlanningTime(15.0);
   
   RCLCPP_INFO(this->get_logger(), "Planning frame: %s", move_group_arm_->getPlanningFrame().c_str());
@@ -71,62 +71,6 @@ void PickExecutorNode::setupPlanningScene()
   collision_objects.push_back(collision_object);
 
   planning_scene_interface_->addCollisionObjects(collision_objects);
-}
-
-void PickExecutorNode::goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
-{
-  RCLCPP_INFO(this->get_logger(), "Received pick goal via topic");
-  
-  // 토픽으로 받은 목표를 직접 실행 (액션 서버를 거치지 않음)
-  executePickDirectly(msg->pose);
-}
-
-void PickExecutorNode::executePickDirectly(const geometry_msgs::msg::Pose & target_pose)
-{
-  RCLCPP_INFO(this->get_logger(), "Executing pick action directly");
-  
-  try {
-    // Home으로 이동
-    RCLCPP_INFO(this->get_logger(), "Moving to home position");
-    if (!moveToHome()) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to move to home position");
-      return;
-    }
-    
-    // 목표지점 + 0.08m 높이로 이동
-    RCLCPP_INFO(this->get_logger(), "Moving to pick position (0.08m above target)");
-    if (!moveToPickPosition(target_pose)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to move to pick position");
-      return;
-    }
-    
-    // 그리퍼 열기 (추후 구현)
-    RCLCPP_INFO(this->get_logger(), "Opening gripper (placeholder)");
-    // TODO: 그리퍼 열기 구현
-    
-    // 0.08m 하강
-    RCLCPP_INFO(this->get_logger(), "Descending 0.08m to target position");
-    if (!descendToTarget(target_pose)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to descend to target position");
-      return;
-    }
-    
-    // 그리퍼 닫기 (추후 구현)
-    RCLCPP_INFO(this->get_logger(), "Closing gripper (placeholder)");
-    // TODO: 그리퍼 닫기 구현
-    
-    // 0.08m 상승
-    RCLCPP_INFO(this->get_logger(), "Ascending 0.08m from target position");
-    if (!ascendFromTarget(target_pose)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to ascend from target position");
-      return;
-    }
-    
-    RCLCPP_INFO(this->get_logger(), "Pick action completed successfully");
-    
-  } catch (const std::exception & e) {
-    RCLCPP_ERROR(this->get_logger(), "Exception during pick execution: %s", e.what());
-  }
 }
 
 rclcpp_action::GoalResponse PickExecutorNode::handleGoal(
@@ -407,4 +351,14 @@ bool PickExecutorNode::ascendFromTarget(const geometry_msgs::msg::Pose & target_
   }
 }
 
-}  // namespace ur_pick_and_place 
+}  // namespace ur_pick_and_place
+
+// main 함수 추가
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<ur_pick_and_place::PickExecutorNode>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
+} 

@@ -52,4 +52,14 @@ bool GripperControllerNode::executeGripperCommand(const std::string & command)
   }
 }
 
-}  // namespace ur_pick_and_place 
+}  // namespace ur_pick_and_place
+
+// main 함수 추가
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<ur_pick_and_place::GripperControllerNode>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
+} 

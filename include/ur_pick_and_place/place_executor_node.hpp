@@ -25,14 +25,11 @@ public:
 
 private:
   rclcpp_action::Server<PlaceAction>::SharedPtr action_server_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
   rclcpp::Client<ur_pick_and_place::srv::GripperControl>::SharedPtr gripper_client_;
   
   std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm_;
   std::unique_ptr<moveit::planning_interface::PlanningSceneInterface> planning_scene_interface_;
   
-  void goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void executePlaceDirectly(const geometry_msgs::msg::Pose & target_pose);
   rclcpp_action::GoalResponse handleGoal(
     const rclcpp_action::GoalUUID & uuid,
     std::shared_ptr<const PlaceAction::Goal> goal);

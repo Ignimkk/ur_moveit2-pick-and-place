@@ -15,7 +15,7 @@ PickPlaceManagerNode::PickPlaceManagerNode(const rclcpp::NodeOptions & options)
   place_action_client_ = rclcpp_action::create_client<PlaceAction>(
     this, "place_action");
     
-  // 구독자 설정
+  // 구독자 설정 (internal goal만 처리)
   pick_goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
     "/internal/pick_goal", 10,
     std::bind(&PickPlaceManagerNode::pickGoalCallback, this, std::placeholders::_1));
@@ -24,9 +24,10 @@ PickPlaceManagerNode::PickPlaceManagerNode(const rclcpp::NodeOptions & options)
     "/internal/place_goal", 10,
     std::bind(&PickPlaceManagerNode::placeGoalCallback, this, std::placeholders::_1));
     
-  trigger_sub_ = this->create_subscription<std_msgs::msg::String>(
-    "/pick_place_trigger", 10,
-    std::bind(&PickPlaceManagerNode::triggerCallback, this, std::placeholders::_1));
+  // Trigger 구독자 제거 - goal receiver가 이미 적절한 순서로 goal 발행
+  // trigger_sub_ = this->create_subscription<std_msgs::msg::String>(
+  //   "/pick_place_trigger", 10,
+  //   std::bind(&PickPlaceManagerNode::triggerCallback, this, std::placeholders::_1));
     
   // 발행자 설정
   status_pub_ = this->create_publisher<std_msgs::msg::String>("/pick_place_status", 10);
@@ -38,41 +39,28 @@ void PickPlaceManagerNode::pickGoalCallback(const geometry_msgs::msg::PoseStampe
 {
   current_pick_goal_ = msg;
   RCLCPP_INFO(this->get_logger(), "Manager received pick goal");
+  
+  // Pick과 place 시퀀스인 경우, 둘 다 있을 때 시작
+  if (current_place_goal_) {
+    RCLCPP_INFO(this->get_logger(), "Both pick and place goals available, starting pick and place sequence");
+    sendPickGoal();
+  } else {
+    RCLCPP_INFO(this->get_logger(), "Pick goal stored, waiting for place goal");
+  }
 }
 
 void PickPlaceManagerNode::placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
   current_place_goal_ = msg;
   RCLCPP_INFO(this->get_logger(), "Manager received place goal");
-}
-
-void PickPlaceManagerNode::triggerCallback(const std_msgs::msg::String::SharedPtr msg)
-{
-  if (msg->data == "start_pick_place") {
-    RCLCPP_INFO(this->get_logger(), "Manager received pick and place trigger");
-    executePickAndPlaceSequence();
-  } else if (msg->data == "start_pick") {
-    RCLCPP_INFO(this->get_logger(), "Manager received pick only trigger");
+  
+  // Pick과 place 시퀀스인 경우, 둘 다 있을 때 시작  
+  if (current_pick_goal_) {
+    RCLCPP_INFO(this->get_logger(), "Both pick and place goals available, starting pick and place sequence");
     sendPickGoal();
-  } else if (msg->data == "start_place") {
-    RCLCPP_INFO(this->get_logger(), "Manager received place only trigger");
-    sendPlaceGoal();
+  } else {
+    RCLCPP_INFO(this->get_logger(), "Place goal stored, waiting for pick goal");
   }
-}
-
-void PickPlaceManagerNode::executePickAndPlaceSequence()
-{
-  if (!current_pick_goal_ || !current_place_goal_) {
-    RCLCPP_ERROR(this->get_logger(), "Missing pick or place goals for sequence");
-    publishStatus("error: missing goals");
-    return;
-  }
-  
-  RCLCPP_INFO(this->get_logger(), "Starting pick and place sequence");
-  publishStatus("starting pick and place sequence");
-  
-  // Pick 먼저 실행 (Place는 pick 완료 후 자동으로 실행됨)
-  sendPickGoal();
 }
 
 void PickPlaceManagerNode::sendPickGoal()
@@ -164,16 +152,18 @@ void PickPlaceManagerNode::pickResultCallback(const GoalHandlePick::WrappedResul
       RCLCPP_INFO(this->get_logger(), "Pick action succeeded: %s", result.result->message.c_str());
       publishStatus("pick completed successfully");
       
-      // Pick이 성공하면 Place 실행 (pick and place 시퀀스인 경우에만)
+      // Pick이 성공하면 place 실행 (place goal이 있는 경우)
       if (current_place_goal_) {
         RCLCPP_INFO(this->get_logger(), "Pick completed, starting place action");
         publishStatus("pick completed, starting place action");
         
         // 잠시 대기 후 place 실행
         std::thread([this]() {
-          std::this_thread::sleep_for(std::chrono::seconds(2));
+          std::this_thread::sleep_for(std::chrono::seconds(1));
           sendPlaceGoal();
         }).detach();
+      } else {
+        publishStatus("pick only operation completed");
       }
       break;
     case rclcpp_action::ResultCode::ABORTED:
@@ -240,4 +230,14 @@ void PickPlaceManagerNode::publishStatus(const std::string & status)
   status_pub_->publish(status_msg);
 }
 
-}  // namespace ur_pick_and_place 
+}  // namespace ur_pick_and_place
+
+// main 함수 추가
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<ur_pick_and_place::PickPlaceManagerNode>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
+} 

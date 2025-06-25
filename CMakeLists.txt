@@ -56,23 +56,18 @@ rosidl_target_interfaces(ur_pick_and_place_moveit
 
 # Create individual executables for modular nodes
 add_executable(goal_receiver_node 
-  src/goal_receiver_main.cpp
   src/goal_receiver_node.cpp)
 
 add_executable(gripper_controller_node 
-  src/gripper_controller_main.cpp
   src/gripper_controller_node.cpp)
 
 add_executable(pick_executor_node 
-  src/pick_executor_main.cpp
   src/pick_executor_node.cpp)
 
 add_executable(place_executor_node 
-  src/place_executor_main.cpp
   src/place_executor_node.cpp)
 
 add_executable(pick_place_manager_node 
-  src/pick_place_manager_main.cpp
   src/pick_place_manager_node.cpp)
 
 # Dependencies for modular node executables

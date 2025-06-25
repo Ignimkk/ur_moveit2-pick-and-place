@@ -21,11 +21,6 @@ PlaceExecutorNode::PlaceExecutorNode(const rclcpp::NodeOptions & options)
     std::bind(&PlaceExecutorNode::handleCancel, this, std::placeholders::_1),
     std::bind(&PlaceExecutorNode::handleAccepted, this, std::placeholders::_1));
     
-  // 목표 수신 구독자
-  goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/internal/place_goal", 10,
-    std::bind(&PlaceExecutorNode::goalCallback, this, std::placeholders::_1));
-    
   // Gripper 클라이언트
   gripper_client_ = this->create_client<ur_pick_and_place::srv::GripperControl>("/gripper/control");
 
@@ -42,7 +37,7 @@ void PlaceExecutorNode::setupMoveGroup()
   planning_scene_interface_ = std::make_unique<moveit::planning_interface::PlanningSceneInterface>();
   
   // 플래너 설정
-  move_group_arm_->setPlannerId("RRTConnect");
+  move_group_arm_->setPlannerId("RRTstar"); //RRTConnect
   move_group_arm_->setPlanningTime(15.0);
   
   RCLCPP_INFO(this->get_logger(), "Planning frame: %s", move_group_arm_->getPlanningFrame().c_str());
@@ -71,61 +66,6 @@ void PlaceExecutorNode::setupPlanningScene()
   collision_objects.push_back(collision_object);
 
   planning_scene_interface_->addCollisionObjects(collision_objects);
-}
-
-void PlaceExecutorNode::goalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
-{
-  RCLCPP_INFO(this->get_logger(), "Received place goal via topic");
-  
-  // 토픽으로 받은 목표를 직접 실행 (액션 서버를 거치지 않음)
-  executePlaceDirectly(msg->pose);
-}
-
-void PlaceExecutorNode::executePlaceDirectly(const geometry_msgs::msg::Pose & target_pose)
-{
-  RCLCPP_INFO(this->get_logger(), "Executing place action directly");
-  
-  try {
-    // Place 위치로 이동
-    RCLCPP_INFO(this->get_logger(), "Moving to place position");
-    if (!moveToPlacePosition(target_pose)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to move to place position");
-      return;
-    }
-    
-    // Approach
-    RCLCPP_INFO(this->get_logger(), "Approaching place position");
-    if (!approachPlacePosition(target_pose)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to approach place position");
-      return;
-    }
-    
-    // Drop
-    RCLCPP_INFO(this->get_logger(), "Dropping object");
-    if (!dropObject()) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to drop object");
-      return;
-    }
-    
-    // Retreat
-    RCLCPP_INFO(this->get_logger(), "Retreating from place position");
-    if (!retreatFromPlacePosition(target_pose)) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to retreat from place position");
-      return;
-    }
-    
-    // Home으로 이동
-    RCLCPP_INFO(this->get_logger(), "Moving to home position");
-    if (!moveToHome()) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to move to home position");
-      return;
-    }
-    
-    RCLCPP_INFO(this->get_logger(), "Place action completed successfully");
-    
-  } catch (const std::exception & e) {
-    RCLCPP_ERROR(this->get_logger(), "Exception during place execution: %s", e.what());
-  }
 }
 
 rclcpp_action::GoalResponse PlaceExecutorNode::handleGoal(
@@ -236,30 +176,61 @@ void PlaceExecutorNode::executePlace(const std::shared_ptr<GoalHandlePlace> goal
 
 bool PlaceExecutorNode::moveToPlacePosition(const geometry_msgs::msg::Pose & target_pose)
 {
-  RCLCPP_INFO(this->get_logger(), "Moving to place position");
+  RCLCPP_INFO(this->get_logger(), "Moving to place position (Carry phase)");
   
-  move_group_arm_->setStartStateToCurrentState();
+  // 현재 end effector 위치 가져오기
+  geometry_msgs::msg::PoseStamped current_pose = move_group_arm_->getCurrentPose();
   
+  RCLCPP_INFO(this->get_logger(), "Current position: x=%.3f, y=%.3f, z=%.3f", 
+              current_pose.pose.position.x, current_pose.pose.position.y, current_pose.pose.position.z);
+  
+  // 토픽으로 받은 target_pose를 place 위치로 사용
   tf2::Quaternion orientation;
   orientation.setRPY(0, -PI, 0);
   geometry_msgs::msg::Quaternion ros_orientation = tf2::toMsg(orientation);
-
-  geometry_msgs::msg::Pose place_pose = target_pose;
-  place_pose.orientation = ros_orientation;
-  place_pose.position.z += 0.08; // Place 높이
-
-  move_group_arm_->setPoseTarget(place_pose);
   
-  moveit::planning_interface::MoveGroupInterface::Plan my_plan;
-  bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+  geometry_msgs::msg::Pose carry_pose = target_pose;
+  carry_pose.orientation = ros_orientation;
+  carry_pose.position.z += 0.08;  // Place 높이 (0.08m 위)
   
-  if (success) {
-    move_group_arm_->execute(my_plan);
+  RCLCPP_INFO(this->get_logger(), "Target place position: x=%.3f, y=%.3f, z=%.3f", 
+              carry_pose.position.x, carry_pose.position.y, carry_pose.position.z);
+  
+  // Cartesian path로 이동 시도
+  std::vector<geometry_msgs::msg::Pose> carry_waypoints;
+  carry_waypoints.push_back(carry_pose);
+  
+  moveit_msgs::msg::RobotTrajectory trajectory;
+  const double jump_threshold = 0.0;
+  const double eef_step = 0.01;
+  
+  double fraction = move_group_arm_->computeCartesianPath(
+      carry_waypoints, eef_step, jump_threshold, trajectory);
+  
+  if (fraction > 0.95) {  // Place는 조금 더 관대한 임계값 사용
+    RCLCPP_INFO(this->get_logger(), "Carry Cartesian path planning successful (%.2f%%)", fraction * 100);
+    move_group_arm_->execute(trajectory);
     rclcpp::sleep_for(std::chrono::seconds(3));
     return true;
   } else {
-    RCLCPP_ERROR(this->get_logger(), "Place position planning failed!");
-    return false;
+    RCLCPP_WARN(this->get_logger(), "Carry Cartesian path planning failed (%.2f%%), trying pose target", fraction * 100);
+    
+    // Fallback: pose target 사용
+    move_group_arm_->setStartStateToCurrentState();
+    move_group_arm_->setPoseTarget(carry_pose);
+    
+    moveit::planning_interface::MoveGroupInterface::Plan my_plan;
+    bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+    
+    if (success) {
+      RCLCPP_INFO(this->get_logger(), "Carry pose target planning successful");
+      move_group_arm_->execute(my_plan);
+      rclcpp::sleep_for(std::chrono::seconds(3));
+      return true;
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Both Cartesian and pose target carry planning failed!");
+      return false;
+    }
   }
 }
 
@@ -267,14 +238,23 @@ bool PlaceExecutorNode::approachPlacePosition(const geometry_msgs::msg::Pose & t
 {
   RCLCPP_INFO(this->get_logger(), "Approaching place position");
   
+  // Orientation 설정 (moveToPlacePosition과 동일)
+  tf2::Quaternion orientation;
+  orientation.setRPY(0, -PI, 0);
+  geometry_msgs::msg::Quaternion ros_orientation = tf2::toMsg(orientation);
+  
   std::vector<geometry_msgs::msg::Pose> approach_waypoints;
-  geometry_msgs::msg::Pose approach_pose = target_pose;
   
-  approach_pose.position.z -= 0.04;
-  approach_waypoints.push_back(approach_pose);
+  // 첫 번째 waypoint: target_pose + 0.04m (중간 높이)
+  geometry_msgs::msg::Pose approach_pose1 = target_pose;
+  approach_pose1.orientation = ros_orientation;
+  approach_pose1.position.z += 0.04;
+  approach_waypoints.push_back(approach_pose1);
   
-  approach_pose.position.z -= 0.04;
-  approach_waypoints.push_back(approach_pose);
+  // 두 번째 waypoint: target_pose (최종 place 높이)
+  geometry_msgs::msg::Pose approach_pose2 = target_pose;
+  approach_pose2.orientation = ros_orientation;
+  approach_waypoints.push_back(approach_pose2);
 
   moveit_msgs::msg::RobotTrajectory trajectory;
   const double jump_threshold = 0.0;
@@ -283,13 +263,33 @@ bool PlaceExecutorNode::approachPlacePosition(const geometry_msgs::msg::Pose & t
   double fraction = move_group_arm_->computeCartesianPath(
       approach_waypoints, eef_step, jump_threshold, trajectory);
 
-  if (fraction > 0.98) {
+  if (fraction > 0.95) {
+    RCLCPP_INFO(this->get_logger(), "Approach Cartesian path planning successful (%.2f%%)", fraction * 100);
     move_group_arm_->execute(trajectory);
     rclcpp::sleep_for(std::chrono::seconds(1));
     return true;
   } else {
-    RCLCPP_ERROR(this->get_logger(), "Place approach Cartesian path planning failed! (%.2f%%)", fraction * 100);
-    return false;
+    RCLCPP_WARN(this->get_logger(), "Approach Cartesian path planning failed (%.2f%%), trying pose target", fraction * 100);
+    
+    // Fallback: 직접 최종 위치로 이동
+    geometry_msgs::msg::Pose final_approach = target_pose;
+    final_approach.orientation = ros_orientation;
+    
+    move_group_arm_->setStartStateToCurrentState();
+    move_group_arm_->setPoseTarget(final_approach);
+    
+    moveit::planning_interface::MoveGroupInterface::Plan approach_plan;
+    bool success = (move_group_arm_->plan(approach_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+    
+    if (success) {
+      RCLCPP_INFO(this->get_logger(), "Approach pose target planning successful");
+      move_group_arm_->execute(approach_plan);
+      rclcpp::sleep_for(std::chrono::seconds(1));
+      return true;
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Both Cartesian and pose target approach planning failed!");
+      return false;
+    }
   }
 }
 
@@ -316,14 +316,24 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
 {
   RCLCPP_INFO(this->get_logger(), "Retreating from place position");
   
+  // Orientation 설정 (일관성 유지)
+  tf2::Quaternion orientation;
+  orientation.setRPY(0, -PI, 0);
+  geometry_msgs::msg::Quaternion ros_orientation = tf2::toMsg(orientation);
+  
   std::vector<geometry_msgs::msg::Pose> retreat_waypoints;
-  geometry_msgs::msg::Pose retreat_pose = target_pose;
   
-  retreat_pose.position.z += 0.04;
-  retreat_waypoints.push_back(retreat_pose);
+  // 첫 번째 waypoint: target_pose + 0.04m
+  geometry_msgs::msg::Pose retreat_pose1 = target_pose;
+  retreat_pose1.orientation = ros_orientation;
+  retreat_pose1.position.z += 0.04;
+  retreat_waypoints.push_back(retreat_pose1);
   
-  retreat_pose.position.z += 0.04;
-  retreat_waypoints.push_back(retreat_pose);
+  // 두 번째 waypoint: target_pose + 0.08m (carry 높이로 복귀)
+  geometry_msgs::msg::Pose retreat_pose2 = target_pose;
+  retreat_pose2.orientation = ros_orientation;
+  retreat_pose2.position.z += 0.08;
+  retreat_waypoints.push_back(retreat_pose2);
 
   moveit_msgs::msg::RobotTrajectory trajectory;
   const double jump_threshold = 0.0;
@@ -332,13 +342,34 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
   double fraction = move_group_arm_->computeCartesianPath(
       retreat_waypoints, eef_step, jump_threshold, trajectory);
 
-  if (fraction > 0.98) {
+  if (fraction > 0.95) {
+    RCLCPP_INFO(this->get_logger(), "Retreat Cartesian path planning successful (%.2f%%)", fraction * 100);
     move_group_arm_->execute(trajectory);
     rclcpp::sleep_for(std::chrono::seconds(1));
     return true;
   } else {
-    RCLCPP_ERROR(this->get_logger(), "Place retreat Cartesian path planning failed! (%.2f%%)", fraction * 100);
-    return false;
+    RCLCPP_WARN(this->get_logger(), "Retreat Cartesian path planning failed (%.2f%%), trying pose target", fraction * 100);
+    
+    // Fallback: 최종 retreat 위치로 직접 이동
+    geometry_msgs::msg::Pose final_retreat = target_pose;
+    final_retreat.orientation = ros_orientation;
+    final_retreat.position.z += 0.08;
+    
+    move_group_arm_->setStartStateToCurrentState();
+    move_group_arm_->setPoseTarget(final_retreat);
+    
+    moveit::planning_interface::MoveGroupInterface::Plan retreat_plan;
+    bool success = (move_group_arm_->plan(retreat_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+    
+    if (success) {
+      RCLCPP_INFO(this->get_logger(), "Retreat pose target planning successful");
+      move_group_arm_->execute(retreat_plan);
+      rclcpp::sleep_for(std::chrono::seconds(1));
+      return true;
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Both Cartesian and pose target retreat planning failed!");
+      return false;
+    }
   }
 }
 
@@ -371,4 +402,14 @@ bool PlaceExecutorNode::moveToHome()
   }
 }
 
-}  // namespace ur_pick_and_place 
+}  // namespace ur_pick_and_place
+
+// main 함수 추가  
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<ur_pick_and_place::PlaceExecutorNode>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
+} 
