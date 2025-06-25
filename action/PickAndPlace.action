@@ -1,0 +1,11 @@
+# Goal
+string operation_type
+geometry_msgs/Pose target_pose
+---
+# Result
+bool success
+string message
+---
+# Feedback
+string current_step 
+float32 completion_percentage
