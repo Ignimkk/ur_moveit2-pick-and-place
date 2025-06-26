@@ -193,6 +193,7 @@ install(DIRECTORY
 # Install Python scripts
 install(PROGRAMS
   scripts/test_modular_system.py
+  scripts/real_robot_demo.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

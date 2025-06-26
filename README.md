@@ -50,37 +50,63 @@ gripper_controller_node
 
 ## 실행 방법
 
-### 1. 시뮬레이션 환경 실행 (필수)
+### 🎯 시뮬레이션 vs 실물 로봇 설정
+
+이 시스템은 **하나의 런치 파일**로 시뮬레이션과 실물 로봇을 모두 지원합니다:
+
+| 환경 | use_sim_time 설정 | 명령어 |
+|------|------------------|--------|
+| **시뮬레이션** | `true` (기본값) | `ros2 launch ur_pick_and_place modular_pick_and_place.launch.py` |
+| **실물 로봇** | `false` | `ros2 launch ur_pick_and_place modular_pick_and_place.launch.py use_sim_time:=false` |
+
+### 1. 시뮬레이션 환경 실행
 
 ```bash
 # 터미널 1: UR 시뮬레이션 환경 시작
 ros2 launch ur_simulation_gz ur_sim_moveit.launch.py
-```
 
-### 2. 모듈화된 시스템 실행
-
-```bash
-# 터미널 2: Pick and Place 노드들 실행
+# 터미널 2: Pick and Place 노드들 실행 (시뮬레이션 모드)
 ros2 launch ur_pick_and_place modular_pick_and_place.launch.py
-```
 
-실행되는 노드들:
-- `goal_receiver_node`: 외부 목표 수신 및 시퀀스 관리
-- `pick_executor_node`: Pick 동작 전문 실행
-- `place_executor_node`: Place 동작 전문 실행  
-- `gripper_controller_node`: Gripper 제어
-- `pick_place_manager_node`: 시퀀스 흐름 관리
-
-### 3. 자동화된 테스트 실행
-
-```bash
-# 터미널 3: 자동 테스트 실행 (선택 없이 바로 pick&place 진행)
+# 터미널 3: 자동 테스트 실행
 ros2 run ur_pick_and_place test_modular_system.py
 ```
 
-자동으로 실행되는 시퀀스:
-- Pick goal과 place goal 설정 후 자동으로 pick&place 실행
-- 사용자 선택이나 별도 트리거 불필요
+### 2. 실물 로봇 환경 실행
+
+#### 🤖 실물 로봇 연결 요구사항
+- UR5e 로봇 (또는 다른 UR 시리즈)
+- 네트워크 연결 (예: 로봇 IP `192.168.1.102`)
+- URCap External Control 설치 (headless_mode=false인 경우)
+
+#### 실행 순서
+
+```bash
+# 터미널 1: 실물 로봇 드라이버 실행
+ros2 launch ur_robot_driver ur_control.launch.py \
+    ur_type:=ur5e \
+    robot_ip:=192.168.1.102 \
+    headless_mode:=false
+
+# 터미널 2: MoveIt 계획 실행 (실물 모드)
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+    ur_type:=ur5e \
+    use_sim_time:=false
+
+# 터미널 3: Pick and Place 노드들 실행 (실물 모드)
+ros2 launch ur_pick_and_place modular_pick_and_place.launch.py use_sim_time:=false
+
+# 터미널 4: 안전한 실물 로봇 데모 실행 ⚠️ 안전 주의!
+ros2 run ur_pick_and_place real_robot_demo.py
+```
+
+#### ⚠️ 실물 로봇 안전 사항
+- **작업 공간 확인**: 로봇 주변에 장애물이 없는지 확인
+- **비상정지 준비**: 언제든 Emergency Stop 버튼을 누를 수 있도록 준비  
+- **보수적 좌표**: 처음에는 더 안전한 거리의 좌표 사용
+- **단계별 테스트**: 한 번에 모든 동작이 아닌 단계별로 확인
+
+### 3. 자동화된 테스트 실행
 
 ## 프로젝트 디렉토리 구조 (v2.0)
 
@@ -108,7 +134,8 @@ ur_pick_and_place/
 ├── launch/                          # ROS2 런치 파일
 │   └── modular_pick_and_place.launch.py  # 모든 노드 실행
 ├── scripts/                         # 테스트 스크립트
-│   └── test_modular_system.py       # 자동화된 테스트 스크립트
+│   ├── test_modular_system.py       # 자동화된 테스트 스크립트 (시뮬레이션)
+│   └── real_robot_demo.py           # 실물 로봇 안전 데모 스크립트
 ├── CMakeLists.txt                   # CMake 빌드 설정 (단일 파일 빌드)
 ├── package.xml                      # ROS2 패키지 메타데이터
 └── README.md                        # 이 파일
@@ -137,29 +164,36 @@ source install/setup.bash
 
 ## 사용법 - 수동 토픽 전송
 
-### 기본 사용법 (Pick and Place 시퀀스)
+### CLI 명령어로 Pick & Place 실행
 
+#### 시뮬레이션 환경
 ```bash
-# 터미널 1: 시뮬레이션 환경 (필수)
-ros2 launch ur_simulation_gz ur_sim_moveit.launch.py
-
-# 터미널 2: 시스템 실행
-ros2 launch ur_pick_and_place modular_pick_and_place.launch.py
-
-# 터미널 3: Pick 목표 설정
+# Pick 목표 설정 (시뮬레이션용 좌표)
 ros2 topic pub --once /pick_goal geometry_msgs/msg/PoseStamped \
-"{header: {frame_id: 'base_link', stamp: {sec: 0, nanosec: 0}}, 
-  pose: {position: {x: 0.010, y: 0.410, z: 0.264}, 
-         orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
+'{header: {frame_id: "base_link"}, pose: {position: {x: 0.010, y: 0.410, z: 0.264}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}'
 
-# 터미널 4: Place 목표 설정 (시퀀스 자동 시작)
+# Place 목표 설정 (시뮬레이션용 좌표)
 ros2 topic pub --once /place_goal geometry_msgs/msg/PoseStamped \
-"{header: {frame_id: 'base_link', stamp: {sec: 0, nanosec: 0}}, 
-  pose: {position: {x: -0.340, y: 0.310, z: 0.264}, 
-         orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
-
-# 두 목표가 모두 설정되면 자동으로 Pick & Place 시퀀스 실행!
+'{header: {frame_id: "base_link"}, pose: {position: {x: -0.340, y: 0.310, z: 0.264}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}'
 ```
+
+#### 실물 로봇 환경 (⚠️ 안전한 좌표)
+```bash
+# Pick 목표 설정 (실물 로봇용 안전한 좌표)
+ros2 topic pub --once /pick_goal geometry_msgs/msg/PoseStamped \
+'{header: {frame_id: "base_link"}, pose: {position: {x: 0.3, y: 0.2, z: 0.3}, orientation: {w: 0.707, x: 0.707, y: 0.0, z: 0.0}}}'
+
+# Place 목표 설정 (실물 로봇용 안전한 좌표)  
+ros2 topic pub --once /place_goal geometry_msgs/msg/PoseStamped \
+'{header: {frame_id: "base_link"}, pose: {position: {x: -0.2, y: 0.3, z: 0.3}, orientation: {w: 0.707, x: 0.707, y: 0.0, z: 0.0}}}'
+```
+
+### 실행되는 노드들
+- `goal_receiver_node`: 외부 목표 수신 및 시퀀스 관리
+- `pick_executor_node`: Pick 동작 전문 실행
+- `place_executor_node`: Place 동작 전문 실행  
+- `gripper_controller_node`: Gripper 제어
+- `pick_place_manager_node`: 시퀀스 흐름 관리
 
 **📝 참고**: 두 목표 중 하나만 설정하면 시스템이 대기 상태에 머물며, 두 목표가 모두 설정되어야 시퀀스가 시작됩니다.
 
