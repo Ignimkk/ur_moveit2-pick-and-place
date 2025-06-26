@@ -149,6 +149,12 @@ ur_pick_and_place/
 # ROS2 및 MoveIt 의존성 확인
 sudo apt install ros-humble-moveit ros-humble-joint-state-publisher-gui
 
+# UR 로봇 관련 패키지
+sudo apt install ros-humble-ur-*
+
+# Ignition Gazebo (시뮬레이션용)
+sudo apt install ros-humble-ros-gz-sim ros-humble-ros-gz-bridge ros-humble-ign-ros2-control
+
 # 워크스페이스에서 의존성 자동 설치
 cd ~/dev_ws/UR/ur_simulation
 rosdep install --from-paths src --ignore-src -r -y
@@ -234,9 +240,15 @@ Table Center:   [0.000, 0.350, 0.260]
 
 1. **시뮬레이션 환경이 실행되지 않는 경우**:
    ```bash
-   # 의존성 재설치
+   # UR 관련 패키지 재설치
    sudo apt install ros-humble-ur-*
-   sudo apt install ros-humble-gazebo-*
+   
+   # Ignition Gazebo (gz) 관련 패키지 설치
+   sudo apt install ros-humble-ros-gz-sim ros-humble-ros-gz-bridge
+   sudo apt install ros-humble-ign-ros2-control
+   
+   # 전체 gz 관련 패키지 설치
+   sudo apt install ros-humble-ros-gz*
    ```
 
 2. **MoveIt 계획 실패**:
