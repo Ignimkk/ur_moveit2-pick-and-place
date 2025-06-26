@@ -36,9 +36,11 @@ void PlaceExecutorNode::setupMoveGroup()
     
   planning_scene_interface_ = std::make_unique<moveit::planning_interface::PlanningSceneInterface>();
   
-  // 플래너 설정
-  move_group_arm_->setPlannerId("RRTstar"); //RRTConnect
-  move_group_arm_->setPlanningTime(15.0);
+  // 플래너 설정 (더 유연하게)
+  move_group_arm_->setPlannerId("RRTConnect"); // RRTConnect가 더 안정적
+  move_group_arm_->setPlanningTime(20.0); // Planning 시간 증가
+  move_group_arm_->setNumPlanningAttempts(5); // 재시도 횟수 증가
+  move_group_arm_->setGoalTolerance(0.01); // 목표 허용 오차 증가
   
   RCLCPP_INFO(this->get_logger(), "Planning frame: %s", move_group_arm_->getPlanningFrame().c_str());
   RCLCPP_INFO(this->get_logger(), "End effector link: %s", move_group_arm_->getEndEffectorLink().c_str());
@@ -375,7 +377,7 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
 
 bool PlaceExecutorNode::moveToHome()
 {
-  RCLCPP_INFO(this->get_logger(), "Moving to home position");
+  RCLCPP_INFO(this->get_logger(), "Going Home");
   
   move_group_arm_->setStartStateToCurrentState();
   
@@ -393,8 +395,9 @@ bool PlaceExecutorNode::moveToHome()
   bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
   
   if (success) {
+    RCLCPP_INFO(this->get_logger(), "Home position planning successful");
     move_group_arm_->execute(my_plan);
-    rclcpp::sleep_for(std::chrono::seconds(1));
+    rclcpp::sleep_for(std::chrono::seconds(2));
     return true;
   } else {
     RCLCPP_ERROR(this->get_logger(), "Home position planning failed!");

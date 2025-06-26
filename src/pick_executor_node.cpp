@@ -41,9 +41,11 @@ void PickExecutorNode::setupMoveGroup()
     
   planning_scene_interface_ = std::make_unique<moveit::planning_interface::PlanningSceneInterface>();
   
-  // 플래너 설정
-  move_group_arm_->setPlannerId("RRTstar");//RRTConnect
-  move_group_arm_->setPlanningTime(15.0);
+  // 플래너 설정 (더 유연하게)
+  move_group_arm_->setPlannerId("RRTConnect"); // RRTConnect가 더 안정적
+  move_group_arm_->setPlanningTime(20.0); // Planning 시간 증가
+  move_group_arm_->setNumPlanningAttempts(5); // 재시도 횟수 증가
+  move_group_arm_->setGoalTolerance(0.01); // 목표 허용 오차 증가
   
   RCLCPP_INFO(this->get_logger(), "Planning frame: %s", move_group_arm_->getPlanningFrame().c_str());
   RCLCPP_INFO(this->get_logger(), "End effector link: %s", move_group_arm_->getEndEffectorLink().c_str());
@@ -105,14 +107,14 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
   auto result = std::make_shared<PickAction::Result>();
   
   try {
-    // Home으로 이동
-    feedback->current_step = "Moving to home position";
+    // Pick 진행 전 Home 위치로 이동
+    feedback->current_step = "Moving to home position before pick";
     feedback->completion_percentage = 10.0;
     goal_handle->publish_feedback(feedback);
     
     if (!moveToHome()) {
       result->success = false;
-      result->message = "Failed to move to home position";
+      result->message = "Failed to move to home position before pick";
       goal_handle->abort(result);
       return;
     }
@@ -186,7 +188,7 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
 
 bool PickExecutorNode::moveToHome()
 {
-  RCLCPP_INFO(this->get_logger(), "Moving to home position");
+  RCLCPP_INFO(this->get_logger(), "Going Home");
   
   move_group_arm_->setStartStateToCurrentState();
   
@@ -204,8 +206,9 @@ bool PickExecutorNode::moveToHome()
   bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
   
   if (success) {
+    RCLCPP_INFO(this->get_logger(), "Home position planning successful");
     move_group_arm_->execute(my_plan);
-    rclcpp::sleep_for(std::chrono::seconds(1));
+    rclcpp::sleep_for(std::chrono::seconds(2));
     return true;
   } else {
     RCLCPP_ERROR(this->get_logger(), "Home position planning failed!");
@@ -244,41 +247,44 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
 
 bool PickExecutorNode::descendToTarget(const geometry_msgs::msg::Pose & target_pose)
 {
-  RCLCPP_INFO(this->get_logger(), "Descending 0.08m to target position");
-  
-  std::vector<geometry_msgs::msg::Pose> descend_waypoints;
-  geometry_msgs::msg::Pose descend_pose = target_pose;
+  RCLCPP_INFO(this->get_logger(), "Approach to object!");
   
   tf2::Quaternion orientation;
   orientation.setRPY(0, -PI, 0);
   geometry_msgs::msg::Quaternion ros_orientation = tf2::toMsg(orientation);
-  descend_pose.orientation = ros_orientation;
   
-  // 중간 지점들 추가 (0.08m를 4단계로 나누어 하강)
-  for (int i = 1; i <= 4; i++) {
-    descend_pose.position.z = target_pose.position.z + 0.08 - (0.02 * i);
-    descend_waypoints.push_back(descend_pose);
-  }
+  std::vector<geometry_msgs::msg::Pose> approach_waypoints;
+  geometry_msgs::msg::Pose approach_pose = target_pose;
+  approach_pose.orientation = ros_orientation;
+  
+  // 첫 번째 waypoint: target_pose + 0.04m (중간 지점)
+  approach_pose.position.z += 0.04;
+  approach_waypoints.push_back(approach_pose);
+  
+  // 두 번째 waypoint: target_pose (최종 목표)
+  approach_pose.position.z -= 0.04;
+  approach_waypoints.push_back(approach_pose);
 
-  moveit_msgs::msg::RobotTrajectory trajectory;
+  moveit_msgs::msg::RobotTrajectory trajectory_approach;
   const double jump_threshold = 0.0;
-  const double eef_step = 0.005; // 더 세밀한 스텝
+  const double eef_step = 0.01;
 
   double fraction = move_group_arm_->computeCartesianPath(
-      descend_waypoints, eef_step, jump_threshold, trajectory);
+      approach_waypoints, eef_step, jump_threshold, trajectory_approach);
 
-  if (fraction > 0.95) { // 조금 더 관대한 임계값
-    RCLCPP_INFO(this->get_logger(), "Descend Cartesian path planning successful (%.2f%%)", fraction * 100);
-    move_group_arm_->execute(trajectory);
+  if (fraction > 0.98) {
+    RCLCPP_INFO(this->get_logger(), "Approach Cartesian path planning successful (%.2f%%)", fraction * 100);
+    move_group_arm_->execute(trajectory_approach);
     rclcpp::sleep_for(std::chrono::seconds(1));
     return true;
   } else {
-    RCLCPP_WARN(this->get_logger(), "Descend Cartesian path planning failed (%.2f%%), trying pose target", fraction * 100);
+    RCLCPP_ERROR(this->get_logger(), "Approach Cartesian path planning failed! (%.2f%%)", fraction * 100);
     
     // Fallback: 직접 목표 위치로 이동
     geometry_msgs::msg::Pose final_target = target_pose;
     final_target.orientation = ros_orientation;
     
+    move_group_arm_->setStartStateToCurrentState();
     move_group_arm_->setPoseTarget(final_target);
     
     moveit::planning_interface::MoveGroupInterface::Plan descend_plan;
@@ -298,42 +304,45 @@ bool PickExecutorNode::descendToTarget(const geometry_msgs::msg::Pose & target_p
 
 bool PickExecutorNode::ascendFromTarget(const geometry_msgs::msg::Pose & target_pose)
 {
-  RCLCPP_INFO(this->get_logger(), "Ascending 0.08m from target position");
-  
-  std::vector<geometry_msgs::msg::Pose> ascend_waypoints;
-  geometry_msgs::msg::Pose ascend_pose = target_pose;
+  RCLCPP_INFO(this->get_logger(), "Retreat from object!");
   
   tf2::Quaternion orientation;
   orientation.setRPY(0, -PI, 0);
   geometry_msgs::msg::Quaternion ros_orientation = tf2::toMsg(orientation);
-  ascend_pose.orientation = ros_orientation;
   
-  // 중간 지점들 추가 (0.08m를 4단계로 나누어 상승)
-  for (int i = 1; i <= 4; i++) {
-    ascend_pose.position.z = target_pose.position.z + (0.02 * i);
-    ascend_waypoints.push_back(ascend_pose);
-  }
+  std::vector<geometry_msgs::msg::Pose> retreat_waypoints;
+  geometry_msgs::msg::Pose retreat_pose = target_pose;
+  retreat_pose.orientation = ros_orientation;
+  
+  // 첫 번째 waypoint: target_pose + 0.04m
+  retreat_pose.position.z += 0.04;
+  retreat_waypoints.push_back(retreat_pose);
+  
+  // 두 번째 waypoint: target_pose + 0.08m (최종 retreat 위치)
+  retreat_pose.position.z += 0.04;
+  retreat_waypoints.push_back(retreat_pose);
 
-  moveit_msgs::msg::RobotTrajectory trajectory;
+  moveit_msgs::msg::RobotTrajectory trajectory_retreat;
   const double jump_threshold = 0.0;
-  const double eef_step = 0.005; // 더 세밀한 스텝
+  const double eef_step = 0.01;
 
   double fraction = move_group_arm_->computeCartesianPath(
-      ascend_waypoints, eef_step, jump_threshold, trajectory);
+      retreat_waypoints, eef_step, jump_threshold, trajectory_retreat);
 
-  if (fraction > 0.95) { // 조금 더 관대한 임계값
-    RCLCPP_INFO(this->get_logger(), "Ascend Cartesian path planning successful (%.2f%%)", fraction * 100);
-    move_group_arm_->execute(trajectory);
+  if (fraction > 0.98) {
+    RCLCPP_INFO(this->get_logger(), "Retreat Cartesian path planning successful (%.2f%%)", fraction * 100);
+    move_group_arm_->execute(trajectory_retreat);
     rclcpp::sleep_for(std::chrono::seconds(1));
     return true;
   } else {
-    RCLCPP_WARN(this->get_logger(), "Ascend Cartesian path planning failed (%.2f%%), trying pose target", fraction * 100);
+    RCLCPP_ERROR(this->get_logger(), "Retreat Cartesian path planning failed! (%.2f%%)", fraction * 100);
     
     // Fallback: 목표 위치 + 0.08m로 이동
     geometry_msgs::msg::Pose final_ascend = target_pose;
     final_ascend.orientation = ros_orientation;
     final_ascend.position.z += 0.08;
     
+    move_group_arm_->setStartStateToCurrentState();
     move_group_arm_->setPoseTarget(final_ascend);
     
     moveit::planning_interface::MoveGroupInterface::Plan ascend_plan;

@@ -40,11 +40,13 @@ gripper_controller_node
 
 ### 🔄 자동 시퀀스 플로우
 
-1. **목표 설정**: Pick/Place 좌표를 각각 토픽으로 전송
-2. **시퀀스 시작**: `start_pick_place` 트리거로 전체 시퀀스 시작
+1. **목표 설정**: Pick과 Place 좌표를 모두 토픽으로 전송 (둘 다 필수)
+2. **자동 실행**: 두 goal 모두 수신되면 manager가 자동으로 시퀀스 시작
 3. **Pick 실행**: Pick executor가 물체 집기
 4. **자동 Place**: Pick 완료 시 manager가 자동으로 place 실행
 5. **완료**: Place 완료 후 홈 위치로 복귀
+
+**⚠️ 중요**: Pick과 Place는 반드시 함께 실행되어야 하며, 단독 실행은 지원하지 않습니다.
 
 ## 실행 방법
 
@@ -72,15 +74,13 @@ ros2 launch ur_pick_and_place modular_pick_and_place.launch.py
 ### 3. 자동화된 테스트 실행
 
 ```bash
-# 터미널 3: 자동 테스트 실행
+# 터미널 3: 자동 테스트 실행 (선택 없이 바로 pick&place 진행)
 ros2 run ur_pick_and_place test_modular_system.py
 ```
 
-테스트 시나리오 선택:
-- **1**: Pick and Place 시퀀스 (기본) - Pick 완료 후 자동으로 Place 실행
-- **2**: Pick만 실행 - 물체 집기만 수행
-- **3**: Place만 실행 - 물체 놓기만 수행  
-- **4**: 개별 테스트 - Pick 완료 후 사용자가 직접 Place 실행
+자동으로 실행되는 시퀀스:
+- Pick goal과 place goal 설정 후 자동으로 pick&place 실행
+- 사용자 선택이나 별도 트리거 불필요
 
 ## 프로젝트 디렉토리 구조 (v2.0)
 
@@ -137,7 +137,7 @@ source install/setup.bash
 
 ## 사용법 - 수동 토픽 전송
 
-### 기본 사용법 (Pick and Place)
+### 기본 사용법 (Pick and Place 시퀀스)
 
 ```bash
 # 터미널 1: 시뮬레이션 환경 (필수)
@@ -152,41 +152,16 @@ ros2 topic pub --once /pick_goal geometry_msgs/msg/PoseStamped \
   pose: {position: {x: 0.010, y: 0.410, z: 0.264}, 
          orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
 
-# 터미널 4: Place 목표 설정 (1-2초 후)
+# 터미널 4: Place 목표 설정 (시퀀스 자동 시작)
 ros2 topic pub --once /place_goal geometry_msgs/msg/PoseStamped \
 "{header: {frame_id: 'base_link', stamp: {sec: 0, nanosec: 0}}, 
   pose: {position: {x: -0.340, y: 0.310, z: 0.264}, 
          orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}"
 
-# 터미널 5: 실행 트리거 (두 목표 모두 설정 후)
-ros2 topic pub --once /pick_place_trigger std_msgs/msg/String "data: 'start_pick_place'"
+# 두 목표가 모두 설정되면 자동으로 Pick & Place 시퀀스 실행!
 ```
 
-### Pick만 실행
-
-```bash
-# Pick 목표 설정
-ros2 topic pub --once /pick_goal geometry_msgs/msg/PoseStamped \
-"{header: {frame_id: 'base_link'}, 
-  pose: {position: {x: 0.010, y: 0.410, z: 0.264}, 
-         orientation: {w: 1.0}}}"
-
-# Pick 실행 트리거
-ros2 topic pub --once /pick_place_trigger std_msgs/msg/String "data: 'start_pick'"
-```
-
-### Place만 실행
-
-```bash
-# Place 목표 설정
-ros2 topic pub --once /place_goal geometry_msgs/msg/PoseStamped \
-"{header: {frame_id: 'base_link'}, 
-  pose: {position: {x: -0.340, y: 0.310, z: 0.264}, 
-         orientation: {w: 1.0}}}"
-
-# Place 실행 트리거
-ros2 topic pub --once /pick_place_trigger std_msgs/msg/String "data: 'start_place'"
-```
+**📝 참고**: 두 목표 중 하나만 설정하면 시스템이 대기 상태에 머물며, 두 목표가 모두 설정되어야 시퀀스가 시작됩니다.
 
 ## 동작 시퀀스 상세
 

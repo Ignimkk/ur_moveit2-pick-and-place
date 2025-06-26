@@ -37,6 +37,7 @@ private:
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   
+  void executePickAndPlaceSequence();
   void sendPickGoal();
   void sendPlaceGoal();
   

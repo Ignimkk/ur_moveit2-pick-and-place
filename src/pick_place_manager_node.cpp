@@ -40,12 +40,12 @@ void PickPlaceManagerNode::pickGoalCallback(const geometry_msgs::msg::PoseStampe
   current_pick_goal_ = msg;
   RCLCPP_INFO(this->get_logger(), "Manager received pick goal");
   
-  // Pick과 place 시퀀스인 경우, 둘 다 있을 때 시작
+  // Pick과 place는 반드시 함께 실행되어야 함
   if (current_place_goal_) {
     RCLCPP_INFO(this->get_logger(), "Both pick and place goals available, starting pick and place sequence");
-    sendPickGoal();
+    executePickAndPlaceSequence();
   } else {
-    RCLCPP_INFO(this->get_logger(), "Pick goal stored, waiting for place goal");
+    RCLCPP_INFO(this->get_logger(), "Pick goal stored, waiting for place goal (pick-only execution not allowed)");
   }
 }
 
@@ -54,13 +54,23 @@ void PickPlaceManagerNode::placeGoalCallback(const geometry_msgs::msg::PoseStamp
   current_place_goal_ = msg;
   RCLCPP_INFO(this->get_logger(), "Manager received place goal");
   
-  // Pick과 place 시퀀스인 경우, 둘 다 있을 때 시작  
+  // Pick과 place는 반드시 함께 실행되어야 함  
   if (current_pick_goal_) {
     RCLCPP_INFO(this->get_logger(), "Both pick and place goals available, starting pick and place sequence");
-    sendPickGoal();
+    executePickAndPlaceSequence();
   } else {
-    RCLCPP_INFO(this->get_logger(), "Place goal stored, waiting for pick goal");
+    RCLCPP_INFO(this->get_logger(), "Place goal stored, waiting for pick goal (place-only execution not allowed)");
   }
+}
+
+void PickPlaceManagerNode::executePickAndPlaceSequence()
+{
+  RCLCPP_INFO(this->get_logger(), "Starting pick and place sequence");
+  publishStatus("starting pick and place sequence");
+  
+  // Pick부터 시작 (pick executor가 자체적으로 home 이동 후 pick 실행)
+  // Place는 pick 완료 후 자동 실행
+  sendPickGoal();
 }
 
 void PickPlaceManagerNode::sendPickGoal()
@@ -152,7 +162,7 @@ void PickPlaceManagerNode::pickResultCallback(const GoalHandlePick::WrappedResul
       RCLCPP_INFO(this->get_logger(), "Pick action succeeded: %s", result.result->message.c_str());
       publishStatus("pick completed successfully");
       
-      // Pick이 성공하면 place 실행 (place goal이 있는 경우)
+      // Pick과 place는 반드시 함께 실행되어야 함
       if (current_place_goal_) {
         RCLCPP_INFO(this->get_logger(), "Pick completed, starting place action");
         publishStatus("pick completed, starting place action");
@@ -163,7 +173,9 @@ void PickPlaceManagerNode::pickResultCallback(const GoalHandlePick::WrappedResul
           sendPlaceGoal();
         }).detach();
       } else {
-        publishStatus("pick only operation completed");
+        // 이 상황은 발생하면 안 됨 (시스템 설계상 에러)
+        RCLCPP_ERROR(this->get_logger(), "Critical error: Pick completed but no place goal available");
+        publishStatus("error: incomplete sequence - missing place goal");
       }
       break;
     case rclcpp_action::ResultCode::ABORTED:

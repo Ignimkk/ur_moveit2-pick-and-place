@@ -3,7 +3,6 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
-#include <std_msgs/msg/string.hpp>
 
 namespace ur_pick_and_place
 {
@@ -16,11 +15,9 @@ public:
 private:
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void triggerCallback(const std_msgs::msg::String::SharedPtr msg);
 
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pick_goal_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr place_goal_sub_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr trigger_sub_;
   
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pick_goal_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr place_goal_pub_;

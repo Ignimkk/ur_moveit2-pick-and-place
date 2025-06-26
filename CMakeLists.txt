@@ -75,7 +75,6 @@ ament_target_dependencies(goal_receiver_node
   rclcpp
   rclcpp_action
   geometry_msgs
-  std_msgs
 )
 
 ament_target_dependencies(gripper_controller_node
