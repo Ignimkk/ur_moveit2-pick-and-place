@@ -107,19 +107,7 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
   auto result = std::make_shared<PickAction::Result>();
   
   try {
-    // Pick 진행 전 Home 위치로 이동
-    feedback->current_step = "Moving to home position before pick";
-    feedback->completion_percentage = 10.0;
-    goal_handle->publish_feedback(feedback);
-    
-    if (!moveToHome()) {
-      result->success = false;
-      result->message = "Failed to move to home position before pick";
-      goal_handle->abort(result);
-      return;
-    }
-    
-    // 목표지점 + 0.08m 높이로 이동
+    // 목표지점 + 0.08m 높이로 이동 (준비자세는 manager가 별도 처리)
     feedback->current_step = "Moving to pick position (0.08m above target)";
     feedback->completion_percentage = 30.0;
     goal_handle->publish_feedback(feedback);
@@ -183,36 +171,6 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
     result->message = std::string("Exception during pick execution: ") + e.what();
     goal_handle->abort(result);
     RCLCPP_ERROR(this->get_logger(), "Exception during pick execution: %s", e.what());
-  }
-}
-
-bool PickExecutorNode::moveToHome()
-{
-  RCLCPP_INFO(this->get_logger(), "Going Home");
-  
-  move_group_arm_->setStartStateToCurrentState();
-  
-  std::vector<double> joint_group_positions(6);
-  joint_group_positions[0] = 0.00;   // Shoulder Pan
-  joint_group_positions[1] = -PI/2;  // Shoulder Lift
-  joint_group_positions[2] = 0.00;   // Elbow
-  joint_group_positions[3] = -PI/2;  // Wrist 1
-  joint_group_positions[4] = 0.00;   // Wrist 2
-  joint_group_positions[5] = 0.00;   // Wrist 3
-
-  move_group_arm_->setJointValueTarget(joint_group_positions);
-
-  moveit::planning_interface::MoveGroupInterface::Plan my_plan;
-  bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
-  
-  if (success) {
-    RCLCPP_INFO(this->get_logger(), "Home position planning successful");
-    move_group_arm_->execute(my_plan);
-    rclcpp::sleep_for(std::chrono::seconds(2));
-    return true;
-  } else {
-    RCLCPP_ERROR(this->get_logger(), "Home position planning failed!");
-    return false;
   }
 }
 

@@ -42,7 +42,6 @@ private:
   bool approachPlacePosition(const geometry_msgs::msg::Pose & target_pose);
   bool dropObject();
   bool retreatFromPlacePosition(const geometry_msgs::msg::Pose & target_pose);
-  bool moveToHome();
   
   void setupPlanningScene();
   void setupMoveGroup();

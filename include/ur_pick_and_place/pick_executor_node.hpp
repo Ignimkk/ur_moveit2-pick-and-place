@@ -38,7 +38,6 @@ private:
   void handleAccepted(const std::shared_ptr<GoalHandlePick> goal_handle);
   void executePick(const std::shared_ptr<GoalHandlePick> goal_handle);
   
-  bool moveToHome();
   bool moveToPickPosition(const geometry_msgs::msg::Pose & target_pose);
   bool descendToTarget(const geometry_msgs::msg::Pose & target_pose);
   bool ascendFromTarget(const geometry_msgs::msg::Pose & target_pose);

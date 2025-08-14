@@ -150,18 +150,6 @@ void PlaceExecutorNode::executePlace(const std::shared_ptr<GoalHandlePlace> goal
       return;
     }
     
-    // Home으로 이동
-    feedback->current_step = "Moving to home position";
-    feedback->completion_percentage = 100.0;
-    goal_handle->publish_feedback(feedback);
-    
-    if (!moveToHome()) {
-      result->success = false;
-      result->message = "Failed to move to home position";
-      goal_handle->abort(result);
-      return;
-    }
-    
     result->success = true;
     result->message = "Place action completed successfully";
     goal_handle->succeed(result);
@@ -372,36 +360,6 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
       RCLCPP_ERROR(this->get_logger(), "Both Cartesian and pose target retreat planning failed!");
       return false;
     }
-  }
-}
-
-bool PlaceExecutorNode::moveToHome()
-{
-  RCLCPP_INFO(this->get_logger(), "Going Home");
-  
-  move_group_arm_->setStartStateToCurrentState();
-  
-  std::vector<double> joint_group_positions(6);
-  joint_group_positions[0] = 0.00;   // Shoulder Pan
-  joint_group_positions[1] = -PI/2;  // Shoulder Lift
-  joint_group_positions[2] = 0.00;   // Elbow
-  joint_group_positions[3] = -PI/2;  // Wrist 1
-  joint_group_positions[4] = 0.00;   // Wrist 2
-  joint_group_positions[5] = 0.00;   // Wrist 3
-
-  move_group_arm_->setJointValueTarget(joint_group_positions);
-
-  moveit::planning_interface::MoveGroupInterface::Plan my_plan;
-  bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
-  
-  if (success) {
-    RCLCPP_INFO(this->get_logger(), "Home position planning successful");
-    move_group_arm_->execute(my_plan);
-    rclcpp::sleep_for(std::chrono::seconds(2));
-    return true;
-  } else {
-    RCLCPP_ERROR(this->get_logger(), "Home position planning failed!");
-    return false;
   }
 }
 

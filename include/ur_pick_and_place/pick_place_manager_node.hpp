@@ -8,6 +8,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <memory>
+#include <std_srvs/srv/trigger.hpp>
 
 namespace ur_pick_and_place
 {
@@ -33,6 +34,8 @@ private:
   
   geometry_msgs::msg::PoseStamped::SharedPtr current_pick_goal_;
   geometry_msgs::msg::PoseStamped::SharedPtr current_place_goal_;
+
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_client_;
   
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
@@ -54,6 +57,8 @@ private:
   void placeResultCallback(const GoalHandlePlace::WrappedResult & result);
   
   void publishStatus(const std::string & status);
+  bool callReady();
+  void callReadyAsync(std::function<void(bool)> on_done);
 };
 
 }  // namespace ur_pick_and_place

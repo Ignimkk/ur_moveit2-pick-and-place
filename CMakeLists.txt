@@ -15,6 +15,7 @@ find_package(moveit_core REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 
 # Generate action and service interfaces first
 set(action_files
@@ -70,6 +71,9 @@ add_executable(place_executor_node
 add_executable(pick_place_manager_node 
   src/pick_place_manager_node.cpp)
 
+add_executable(ready_executor_node
+  src/ready_executor_node.cpp)
+
 # Dependencies for modular node executables
 ament_target_dependencies(goal_receiver_node
   rclcpp
@@ -112,6 +116,17 @@ ament_target_dependencies(pick_place_manager_node
   rclcpp_action
   geometry_msgs
   std_msgs
+  std_srvs
+)
+
+ament_target_dependencies(ready_executor_node
+  rclcpp
+  moveit_ros_planning_interface
+  geometry_msgs
+  moveit_core
+  moveit_msgs
+  Eigen3
+  std_srvs
 )
 
 # Set include directories for modular node executables
@@ -140,6 +155,11 @@ target_include_directories(pick_place_manager_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
+target_include_directories(ready_executor_node PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
 # Link interfaces to modular node executables
 rosidl_target_interfaces(goal_receiver_node
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -164,6 +184,7 @@ install(TARGETS
   pick_executor_node
   place_executor_node
   pick_place_manager_node
+  ready_executor_node
   DESTINATION lib/${PROJECT_NAME})
 
 # Install headers

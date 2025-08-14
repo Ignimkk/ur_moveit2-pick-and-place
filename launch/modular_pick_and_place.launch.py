@@ -40,6 +40,15 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}]
     )
     
+    # Ready Executor Node
+    ready_executor_node = Node(
+        package='ur_pick_and_place',
+        executable='ready_executor_node',
+        name='ready_executor_node',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}]
+    )
+    
     # Pick Executor Node
     pick_executor_node = Node(
         package='ur_pick_and_place',
@@ -71,6 +80,7 @@ def generate_launch_description():
         use_sim_time_arg,
         goal_receiver_node,
         gripper_controller_node,
+        ready_executor_node,
         pick_executor_node,
         place_executor_node,
         pick_place_manager_node,

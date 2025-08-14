@@ -32,6 +32,9 @@ PickPlaceManagerNode::PickPlaceManagerNode(const rclcpp::NodeOptions & options)
   // 발행자 설정
   status_pub_ = this->create_publisher<std_msgs::msg::String>("/pick_place_status", 10);
 
+  // Ready 서비스 클라이언트
+  ready_client_ = this->create_client<std_srvs::srv::Trigger>("/ready/move");
+
   RCLCPP_INFO(this->get_logger(), "Pick Place Manager Node initialized");
 }
 
@@ -68,9 +71,17 @@ void PickPlaceManagerNode::executePickAndPlaceSequence()
   RCLCPP_INFO(this->get_logger(), "Starting pick and place sequence");
   publishStatus("starting pick and place sequence");
   
-  // Pick부터 시작 (pick executor가 자체적으로 home 이동 후 pick 실행)
-  // Place는 pick 완료 후 자동 실행
-  sendPickGoal();
+  // 준비자세 이동
+  publishStatus("moving to ready pose");
+  callReadyAsync([this](bool ok){
+    if (!ok) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to move to ready pose before pick");
+      publishStatus("error: failed to move to ready before pick");
+      return;
+    }
+    // Pick부터 시작 (pick executor가 자체적으로 준비자세는 처리하지 않음)
+    sendPickGoal();
+  });
 }
 
 void PickPlaceManagerNode::sendPickGoal()
@@ -162,18 +173,16 @@ void PickPlaceManagerNode::pickResultCallback(const GoalHandlePick::WrappedResul
       RCLCPP_INFO(this->get_logger(), "Pick action succeeded: %s", result.result->message.c_str());
       publishStatus("pick completed successfully");
       
-      // Pick과 place는 반드시 함께 실행되어야 함
+      // Pick 완료 후 place 실행
       if (current_place_goal_) {
         RCLCPP_INFO(this->get_logger(), "Pick completed, starting place action");
         publishStatus("pick completed, starting place action");
         
-        // 잠시 대기 후 place 실행
         std::thread([this]() {
           std::this_thread::sleep_for(std::chrono::seconds(1));
           sendPlaceGoal();
         }).detach();
       } else {
-        // 이 상황은 발생하면 안 됨 (시스템 설계상 에러)
         RCLCPP_ERROR(this->get_logger(), "Critical error: Pick completed but no place goal available");
         publishStatus("error: incomplete sequence - missing place goal");
       }
@@ -219,6 +228,15 @@ void PickPlaceManagerNode::placeResultCallback(const GoalHandlePlace::WrappedRes
     case rclcpp_action::ResultCode::SUCCEEDED:
       RCLCPP_INFO(this->get_logger(), "Place action succeeded: %s", result.result->message.c_str());
       publishStatus("pick and place sequence completed successfully");
+
+      // 완료 후 준비자세 복귀 (비동기, 실패해도 플로우 유지)
+      publishStatus("returning to ready pose");
+      callReadyAsync([this](bool ok){
+        if (!ok) {
+          RCLCPP_ERROR(this->get_logger(), "Failed to move to ready pose after place");
+          publishStatus("error: failed to move to ready after place");
+        }
+      });
       break;
     case rclcpp_action::ResultCode::ABORTED:
       RCLCPP_ERROR(this->get_logger(), "Place action aborted: %s", result.result->message.c_str());
@@ -242,6 +260,54 @@ void PickPlaceManagerNode::publishStatus(const std::string & status)
   status_pub_->publish(status_msg);
 }
 
+bool PickPlaceManagerNode::callReady()
+{
+  if (!ready_client_->wait_for_service(std::chrono::seconds(5))) {
+    RCLCPP_ERROR(this->get_logger(), "Ready service not available");
+    return false;
+  }
+
+  auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+  auto future = ready_client_->async_send_request(request);
+
+  // MultiThreadedExecutor를 사용하므로, std::future 대기만으로도 응답 처리가 가능함
+  auto status = future.wait_for(std::chrono::seconds(20));
+  if (status != std::future_status::ready) {
+    RCLCPP_ERROR(this->get_logger(), "Ready service call timed out");
+    return false;
+  }
+
+  auto response = future.get();
+  if (!response->success) {
+    RCLCPP_ERROR(this->get_logger(), "Ready service returned failure: %s", response->message.c_str());
+  }
+  return response->success;
+}
+
+void PickPlaceManagerNode::callReadyAsync(std::function<void(bool)> on_done)
+{
+  if (!ready_client_->wait_for_service(std::chrono::seconds(5))) {
+    RCLCPP_ERROR(this->get_logger(), "Ready service not available");
+    on_done(false);
+    return;
+  }
+
+  auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+  ready_client_->async_send_request(request,
+    [this, on_done](rclcpp::Client<std_srvs::srv::Trigger>::SharedFuture future){
+      try {
+        auto response = future.get();
+        if (!response->success) {
+          RCLCPP_ERROR(this->get_logger(), "Ready service returned failure: %s", response->message.c_str());
+        }
+        on_done(response->success);
+      } catch (const std::exception & e) {
+        RCLCPP_ERROR(this->get_logger(), "Exception while calling ready service: %s", e.what());
+        on_done(false);
+      }
+    });
+}
+
 }  // namespace ur_pick_and_place
 
 // main 함수 추가
@@ -249,7 +315,9 @@ int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<ur_pick_and_place::PickPlaceManagerNode>();
-  rclcpp::spin(node);
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 } 
