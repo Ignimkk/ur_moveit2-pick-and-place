@@ -5,12 +5,17 @@
 ## 최신 업데이트 (v2.0)
 
 ### 🎯 주요 개선사항
-- **단일 파일 빌드**: 각 노드가 하나의 파일로 통합되어 빌드 단순화
-- **시퀀스 관리 최적화**: Manager가 pick 완료 후 자동으로 place 실행
-- **토픽 좌표 사용**: Place executor가 토픽으로 받은 정확한 위치 사용 (하드코딩 제거)  
-- **Orientation 일관성**: 모든 place 단계에서 일관된 orientation 적용
-- **안정성 향상**: Cartesian path 실패시 fallback 로직 추가
-- **코드 정리**: 사용하지 않는 선언과 함수들 제거
+- **실물 로봇 지원**: 시뮬레이션과 실물 로봇을 `use_sim_time` 파라미터로 간단히 전환
+- **안전 데모 스크립트**: 실물 로봇용 안전 기능이 포함된 `real_robot_demo.py` 추가
+- **Ready Position 노드**: 로봇을 안전한 준비 위치로 이동시키는 `ready_executor_node` 추가
+- **통합 런치 파일**: 하나의 런치 파일로 모든 노드 실행 및 환경 전환 지원
+- **향상된 문서화**: 시뮬레이션/실물 로봇 사용법, 안전 가이드, 트러블슈팅 강화
+
+### 📜 이전 버전 주요 기능 (v1.0)
+- 단일 파일 빌드 구조로 빌드 단순화
+- Manager의 자동 시퀀스 관리 (Pick → Place)
+- 토픽 기반 좌표 사용 (하드코딩 제거)
+- Cartesian path 실패 시 fallback 로직
 
 ## 시스템 구조
 
@@ -19,6 +24,7 @@
 | 기능 | 노드명 | 통신 방식 | 역할 |
 |------|--------|-----------|------|
 | 목표 pose 수신 | `goal_receiver_node` | 토픽 (`/pick_goal`, `/place_goal`) | 외부에서 위치 명령을 수신하고 시퀀스 관리 |
+| Ready 위치 이동 | `ready_executor_node` | 서비스 (`/ready_service`) | 로봇을 안전한 준비 위치로 이동 |
 | Pick 동작 수행 | `pick_executor_node` | 액션 (`pick_action`) | Pick 작업 전문 수행 |
 | Place 동작 수행 | `place_executor_node` | 액션 (`place_action`) | Place 작업 전문 수행 |
 | Gripper 제어 | `gripper_controller_node` | 서비스 (`/gripper/control`) | 서보 또는 IO 제어 |
@@ -27,15 +33,18 @@
 ### 통신 구조 (v2.0)
 
 ```
-외부 시스템 → 토픽 목표 설정 → 토픽 트리거 전송
-    ↓ (/pick_goal, /place_goal)        ↓ (/pick_place_trigger)
-goal_receiver_node ←──────────────────────
+외부 시스템 → 토픽 목표 설정
+    ↓ (/pick_goal, /place_goal)
+goal_receiver_node
     ↓ (내부 토픽: /internal/pick_goal, /internal/place_goal)
 pick_place_manager_node
     ↓ (Pick 액션 → Pick 완료 → Place 액션)
 pick_executor_node ←─────→ place_executor_node
     ↓ (서비스: /gripper/control)
 gripper_controller_node
+
+별도 서비스:
+ready_executor_node (/ready_service) → 안전한 준비 위치로 이동
 ```
 
 ### 🔄 자동 시퀀스 플로우
@@ -120,6 +129,7 @@ ur_pick_and_place/
 │   └── GripperControl.srv           # Gripper 제어 서비스
 ├── include/ur_pick_and_place/       # C++ 헤더 파일
 │   ├── goal_receiver_node.hpp       # 목표 수신 노드 클래스
+│   ├── ready_executor_node.hpp      # Ready 위치 이동 노드 클래스
 │   ├── gripper_controller_node.hpp  # Gripper 제어 노드 클래스
 │   ├── pick_executor_node.hpp       # Pick 실행 노드 클래스
 │   ├── place_executor_node.hpp      # Place 실행 노드 클래스
@@ -127,16 +137,18 @@ ur_pick_and_place/
 ├── src/                             # C++ 구현 파일 (단일 파일 구조)
 │   ├── ur_pick_and_place_moveit.cpp # 기존 단일 파일 코드 (호환성)
 │   ├── goal_receiver_node.cpp       # 목표 수신 구현 + main
+│   ├── ready_executor_node.cpp      # Ready 위치 이동 구현 + main
 │   ├── gripper_controller_node.cpp  # Gripper 제어 구현 + main
 │   ├── pick_executor_node.cpp       # Pick 실행 구현 + main
 │   ├── place_executor_node.cpp      # Place 실행 구현 + main
 │   └── pick_place_manager_node.cpp  # 매니저 구현 + main
 ├── launch/                          # ROS2 런치 파일
-│   └── modular_pick_and_place.launch.py  # 모든 노드 실행
-├── scripts/                         # 테스트 스크립트
-│   ├── test_modular_system.py       # 자동화된 테스트 스크립트 (시뮬레이션)
-│   └── real_robot_demo.py           # 실물 로봇 안전 데모 스크립트
-├── CMakeLists.txt                   # CMake 빌드 설정 (단일 파일 빌드)
+│   ├── modular_pick_and_place.launch.py  # 메인 런치 (시뮬레이션/실물 지원)
+│   └── ur_pick_and_place.launch.py       # 기존 호환성 런치
+├── scripts/                         # 테스트 및 데모 스크립트
+│   ├── test_modular_system.py       # 자동화된 테스트 (시뮬레이션)
+│   └── real_robot_demo.py           # 실물 로봇 안전 데모
+├── CMakeLists.txt                   # CMake 빌드 설정
 ├── package.xml                      # ROS2 패키지 메타데이터
 └── README.md                        # 이 파일
 ```
@@ -196,12 +208,21 @@ ros2 topic pub --once /place_goal geometry_msgs/msg/PoseStamped \
 
 ### 실행되는 노드들
 - `goal_receiver_node`: 외부 목표 수신 및 시퀀스 관리
+- `ready_executor_node`: 안전한 Ready 위치로 이동
 - `pick_executor_node`: Pick 동작 전문 실행
 - `place_executor_node`: Place 동작 전문 실행  
 - `gripper_controller_node`: Gripper 제어
 - `pick_place_manager_node`: 시퀀스 흐름 관리
 
 **📝 참고**: 두 목표 중 하나만 설정하면 시스템이 대기 상태에 머물며, 두 목표가 모두 설정되어야 시퀀스가 시작됩니다.
+
+### Ready Position 서비스 사용
+
+로봇을 안전한 준비 위치로 이동:
+```bash
+# Ready 위치로 이동
+ros2 service call /ready_service std_srvs/srv/Trigger
+```
 
 ## 동작 시퀀스 상세
 
@@ -281,7 +302,8 @@ ros2 launch ur_pick_and_place modular_pick_and_place.launch.py --ros-args --log-
 ## 개발자 정보
 
 ### 버전 히스토리
-- **v2.0**: 단일 파일 구조, 시퀀스 관리 최적화, 안정성 향상
+- **v2.0** (현재): 실물 로봇 지원, Ready Position 노드, 안전 데모 스크립트, 통합 런치 파일
+- **v1.1**: 단일 파일 구조, 시퀀스 관리 최적화, 안정성 향상
 - **v1.0**: 초기 모듈화 구조
 
 ### 기여 방법

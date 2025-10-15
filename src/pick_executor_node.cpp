@@ -178,7 +178,18 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
 {
   RCLCPP_INFO(this->get_logger(), "Moving to pick position (0.08m above target)");
   
+  // Ready pose 이동 완료 후 현재 상태를 확실히 가져오기
+  // 1. 잠시 대기하여 시스템 안정화
+  rclcpp::sleep_for(std::chrono::milliseconds(200));
+  
+  // 2. 현재 상태를 명시적으로 업데이트
   move_group_arm_->setStartStateToCurrentState();
+  
+  // 3. 현재 joint 상태 로깅 (디버깅용)
+  auto current_joints = move_group_arm_->getCurrentJointValues();
+  RCLCPP_INFO(this->get_logger(), "Current joint positions: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]", 
+              current_joints[0], current_joints[1], current_joints[2], 
+              current_joints[3], current_joints[4], current_joints[5]);
   
   tf2::Quaternion orientation;
   orientation.setRPY(0, -PI, 0);
@@ -188,17 +199,54 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
   pick_pose.orientation = ros_orientation;
   pick_pose.position.z += 0.08; // 목표지점 + 0.08m 높이
 
+  // Planning 설정을 더 유연하게 설정
+  move_group_arm_->setPlanningTime(30.0);  // Planning 시간 증가
+  move_group_arm_->setGoalTolerance(0.02); // 목표 허용 오차 증가
+  move_group_arm_->setNumPlanningAttempts(10); // 재시도 횟수 증가
+  
   move_group_arm_->setPoseTarget(pick_pose);
   
   moveit::planning_interface::MoveGroupInterface::Plan my_plan;
   bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
   
   if (success) {
+    RCLCPP_INFO(this->get_logger(), "Pick position planning successful");
     move_group_arm_->execute(my_plan);
     rclcpp::sleep_for(std::chrono::seconds(2));
     return true;
   } else {
-    RCLCPP_ERROR(this->get_logger(), "Pick position planning failed!");
+    RCLCPP_WARN(this->get_logger(), "Initial pick position planning failed, trying with different planner");
+    
+    // Fallback 1: 다른 플래너 시도
+    move_group_arm_->setPlannerId("RRTstar");
+    move_group_arm_->setPlanningTime(40.0);
+    success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+    
+    if (success) {
+      RCLCPP_INFO(this->get_logger(), "Pick position planning successful with RRTstar");
+      move_group_arm_->execute(my_plan);
+      rclcpp::sleep_for(std::chrono::seconds(2));
+      // 원래 플래너로 복원
+      move_group_arm_->setPlannerId("RRTConnect");
+      return true;
+    }
+    
+    // Fallback 2: 더 높은 위치에서 시도 (0.12m 높이)
+    RCLCPP_WARN(this->get_logger(), "Trying higher pick position (0.12m above target)");
+    pick_pose.position.z = target_pose.position.z + 0.12;
+    move_group_arm_->setPoseTarget(pick_pose);
+    move_group_arm_->setPlannerId("RRTConnect");
+    
+    success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
+    
+    if (success) {
+      RCLCPP_INFO(this->get_logger(), "Pick position planning successful at higher position");
+      move_group_arm_->execute(my_plan);
+      rclcpp::sleep_for(std::chrono::seconds(2));
+      return true;
+    }
+    
+    RCLCPP_ERROR(this->get_logger(), "All pick position planning attempts failed!");
     return false;
   }
 }

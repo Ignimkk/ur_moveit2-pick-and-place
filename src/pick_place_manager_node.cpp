@@ -79,7 +79,12 @@ void PickPlaceManagerNode::executePickAndPlaceSequence()
       publishStatus("error: failed to move to ready before pick");
       return;
     }
-    // Pick부터 시작 (pick executor가 자체적으로 준비자세는 처리하지 않음)
+    
+    // Ready pose 완료 후 안정화를 위한 추가 대기
+    RCLCPP_INFO(this->get_logger(), "Ready pose completed, waiting for stabilization");
+    rclcpp::sleep_for(std::chrono::milliseconds(1000));
+    
+    // Pick 시작
     sendPickGoal();
   });
 }
