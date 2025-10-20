@@ -5,6 +5,11 @@
 ## 최신 업데이트 (v3.0)
 
 ### 🎯 주요 개선사항
+- **⏸️ Pause/Resume 기능**: 모든 작업 단계에서 일시정지 및 재개 가능
+  - **즉시 정지**: 명령 수신 후 100-200ms 내 정지
+  - **통합 명령**: 단일 서비스로 현재 실행 중인 작업 제어
+  - **재계획 기능**: Resume 시 현재 위치에서 목표까지 새로운 경로 생성
+  - **모든 단계 지원**: Ready 이동, Pick, Place 전 단계에서 작동
 - **Gazebo 제거**: 물리 시뮬레이션 없이 Fake Hardware로 경량 실행
 - **통합 런치 파일**: `fake_hardware_pick_and_place.launch.py`로 모든 것을 한 번에 실행
 - **RViz 시각화**: Gazebo 대신 RViz만으로 로봇 동작 확인
@@ -234,9 +239,43 @@ colcon build --packages-select ur_pick_and_place
 source install/setup.bash
 ```
 
-## 사용법 - 수동 토픽 전송
+## 사용법
 
-### CLI 명령어로 Pick & Place 실행
+### ⏸️ Pause/Resume 제어 (v3.0 신규)
+
+Pick & Place 시퀀스 중 언제든지 일시정지 및 재개가 가능합니다.
+
+#### 통합 Pause/Resume 서비스
+```bash
+# 일시정지 (현재 실행 중인 작업을 100-200ms 내 정지)
+ros2 service call /pick_place/pause std_srvs/srv/Trigger
+
+# 재개 (현재 위치에서 목표까지 재계획하여 계속 진행)
+ros2 service call /pick_place/resume std_srvs/srv/Trigger
+```
+
+#### 작동 방식
+1. **즉시 정지**: Pause 명령 수신 후 현재 trajectory 즉시 중단
+2. **현재 위치 유지**: 로봇이 정지한 위치에서 대기
+3. **재계획**: Resume 명령 시 현재 위치에서 원래 목표까지 새로운 경로 생성
+4. **계속 진행**: 재계획된 경로로 작업 계속 수행
+
+#### 지원되는 단계
+- ✅ Ready 위치로 이동 중
+- ✅ Pick 위치로 이동 중
+- ✅ Pick 작업 수행 중 (접근, 하강, 상승)
+- ✅ Place 위치로 이동 중
+- ✅ Place 작업 수행 중 (접근, 하강, 상승)
+- ✅ 최종 Ready 위치로 복귀 중
+
+**📝 참고**: 
+- Pause/Resume은 모션 실행 중에만 작동합니다
+- Gripper 동작(잡기/놓기) 중에는 정지할 수 없습니다
+- 재개 시 로봇의 현재 위치가 목표까지 도달 가능한지 자동으로 확인합니다
+
+### 수동 토픽 전송
+
+#### CLI 명령어로 Pick & Place 실행
 
 #### 기본 사용법 (모든 환경 공통)
 ```bash
@@ -361,6 +400,12 @@ ros2 launch ur_pick_and_place modular_pick_and_place.launch.py --ros-args --log-
 
 ### 버전 히스토리
 - **v3.0** (현재): 
+  - **⏸️ Pause/Resume 기능**: 전체 시퀀스에서 실시간 일시정지/재개 지원
+    - 즉시 정지 (100-200ms 응답시간)
+    - 통합 서비스 명령 (`/pick_place/pause`, `/pick_place/resume`)
+    - Resume 시 현재 위치에서 자동 재계획
+    - 별도 Callback Group으로 동시 실행 보장
+    - Ready, Pick, Place 모든 단계에서 작동
   - **Gazebo 제거**: Fake Hardware 기반으로 전환
   - 통합 런치 파일 (`fake_hardware_pick_and_place.launch.py`)
   - 표준 UR 패키지 활용 (ur_bringup, ur_moveit_config)

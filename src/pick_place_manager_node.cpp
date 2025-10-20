@@ -25,11 +25,28 @@ PickPlaceManagerNode::PickPlaceManagerNode(const rclcpp::NodeOptions & options)
 
   // Ready 서비스 클라이언트
   ready_client_ = this->create_client<std_srvs::srv::Trigger>("/ready/move");
+  
+  // Pause/Resume 통합 서비스 및 클라이언트
+  pause_service_ = this->create_service<std_srvs::srv::Trigger>(
+    "/pick_place/pause",
+    std::bind(&PickPlaceManagerNode::pauseCallback, this, std::placeholders::_1, std::placeholders::_2));
+  resume_service_ = this->create_service<std_srvs::srv::Trigger>(
+    "/pick_place/resume",
+    std::bind(&PickPlaceManagerNode::resumeCallback, this, std::placeholders::_1, std::placeholders::_2));
+  
+  pick_pause_client_ = this->create_client<std_srvs::srv::Trigger>("/pick_executor_node/pause");
+  pick_resume_client_ = this->create_client<std_srvs::srv::Trigger>("/pick_executor_node/resume");
+  place_pause_client_ = this->create_client<std_srvs::srv::Trigger>("/place_executor_node/pause");
+  place_resume_client_ = this->create_client<std_srvs::srv::Trigger>("/place_executor_node/resume");
+  
+  // Ready pause/resume 클라이언트 추가 (헤더에도 선언 필요)
+  ready_pause_client_ = this->create_client<std_srvs::srv::Trigger>("/ready_executor_node/pause");
+  ready_resume_client_ = this->create_client<std_srvs::srv::Trigger>("/ready_executor_node/resume");
 
   // 하드코딩된 place 위치 초기화
   initializeHardcodedPlaceGoal();
 
-  RCLCPP_INFO(this->get_logger(), "Pick Place Manager Node initialized (hardcoded place position)");
+  RCLCPP_INFO(this->get_logger(), "Pick Place Manager Node initialized with unified pause/resume control");
 }
 
 void PickPlaceManagerNode::initializeHardcodedPlaceGoal()
@@ -68,10 +85,13 @@ void PickPlaceManagerNode::executePickAndPlaceSequence()
   
   // 준비자세 이동
   publishStatus("moving to ready pose");
+  current_state_ = ExecutionState::EXECUTING_READY;
+  
   callReadyAsync([this](bool ok){
     if (!ok) {
       RCLCPP_ERROR(this->get_logger(), "Failed to move to ready pose before pick");
       publishStatus("error: failed to move to ready before pick");
+      current_state_ = ExecutionState::IDLE;
       return;
     }
     
@@ -104,6 +124,9 @@ void PickPlaceManagerNode::sendPickGoal()
   RCLCPP_INFO(this->get_logger(), "Sending pick goal");
   publishStatus("sending pick goal");
   
+  // 상태 업데이트
+  current_state_ = ExecutionState::EXECUTING_PICK;
+  
   auto send_goal_options = rclcpp_action::Client<PickAction>::SendGoalOptions();
   send_goal_options.goal_response_callback =
     std::bind(&PickPlaceManagerNode::pickGoalResponseCallback, this, std::placeholders::_1);
@@ -134,6 +157,9 @@ void PickPlaceManagerNode::sendPlaceGoal()
   
   RCLCPP_INFO(this->get_logger(), "Sending place goal");
   publishStatus("sending place goal");
+  
+  // 상태 업데이트
+  current_state_ = ExecutionState::EXECUTING_PLACE;
   
   auto send_goal_options = rclcpp_action::Client<PlaceAction>::SendGoalOptions();
   send_goal_options.goal_response_callback =
@@ -190,14 +216,17 @@ void PickPlaceManagerNode::pickResultCallback(const GoalHandlePick::WrappedResul
     case rclcpp_action::ResultCode::ABORTED:
       RCLCPP_ERROR(this->get_logger(), "Pick action aborted: %s", result.result->message.c_str());
       publishStatus("error: pick aborted");
+      current_state_ = ExecutionState::IDLE;
       break;
     case rclcpp_action::ResultCode::CANCELED:
       RCLCPP_ERROR(this->get_logger(), "Pick action canceled");
       publishStatus("error: pick canceled");
+      current_state_ = ExecutionState::IDLE;
       break;
     default:
       RCLCPP_ERROR(this->get_logger(), "Pick action unknown result code");
       publishStatus("error: pick unknown result");
+      current_state_ = ExecutionState::IDLE;
       break;
   }
 }
@@ -231,24 +260,31 @@ void PickPlaceManagerNode::placeResultCallback(const GoalHandlePlace::WrappedRes
 
       // 완료 후 준비자세 복귀 (비동기, 실패해도 플로우 유지)
       publishStatus("returning to ready pose");
+      current_state_ = ExecutionState::EXECUTING_READY;
+      
       callReadyAsync([this](bool ok){
         if (!ok) {
           RCLCPP_ERROR(this->get_logger(), "Failed to move to ready pose after place");
           publishStatus("error: failed to move to ready after place");
         }
+        // Ready 완료 후 IDLE로
+        current_state_ = ExecutionState::IDLE;
       });
       break;
     case rclcpp_action::ResultCode::ABORTED:
       RCLCPP_ERROR(this->get_logger(), "Place action aborted: %s", result.result->message.c_str());
       publishStatus("error: place aborted");
+      current_state_ = ExecutionState::IDLE;
       break;
     case rclcpp_action::ResultCode::CANCELED:
       RCLCPP_ERROR(this->get_logger(), "Place action canceled");
       publishStatus("error: place canceled");
+      current_state_ = ExecutionState::IDLE;
       break;
     default:
       RCLCPP_ERROR(this->get_logger(), "Place action unknown result code");
       publishStatus("error: place unknown result");
+      current_state_ = ExecutionState::IDLE;
       break;
   }
 }
@@ -306,6 +342,155 @@ void PickPlaceManagerNode::callReadyAsync(std::function<void(bool)> on_done)
         on_done(false);
       }
     });
+}
+
+// 통합 Pause/Resume 콜백
+void PickPlaceManagerNode::pauseCallback(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+  (void)request;
+  
+  RCLCPP_INFO(this->get_logger(), "Unified pause requested, current state: %d", static_cast<int>(current_state_));
+  
+  switch (current_state_) {
+    case ExecutionState::EXECUTING_PICK:
+      {
+        if (!pick_pause_client_->service_is_ready()) {
+          response->success = false;
+          response->message = "Pick pause service not available";
+          RCLCPP_ERROR(this->get_logger(), "Pick pause service not available");
+          return;
+        }
+        
+        // Fire-and-forget: 응답을 기다리지 않음
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        pick_pause_client_->async_send_request(req);
+        
+        response->success = true;
+        response->message = "Pick pause command sent";
+        RCLCPP_INFO(this->get_logger(), "Pick pause command sent");
+      }
+      break;
+      
+    case ExecutionState::EXECUTING_PLACE:
+      {
+        if (!place_pause_client_->service_is_ready()) {
+          response->success = false;
+          response->message = "Place pause service not available";
+          RCLCPP_ERROR(this->get_logger(), "Place pause service not available");
+          return;
+        }
+        
+        // Fire-and-forget: 응답을 기다리지 않음
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        place_pause_client_->async_send_request(req);
+        
+        response->success = true;
+        response->message = "Place pause command sent";
+        RCLCPP_INFO(this->get_logger(), "Place pause command sent");
+      }
+      break;
+      
+    case ExecutionState::EXECUTING_READY:
+      {
+        if (!ready_pause_client_->service_is_ready()) {
+          response->success = false;
+          response->message = "Ready pause service not available";
+          RCLCPP_ERROR(this->get_logger(), "Ready pause service not available");
+          return;
+        }
+        
+        // Fire-and-forget: 응답을 기다리지 않음
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        ready_pause_client_->async_send_request(req);
+        
+        response->success = true;
+        response->message = "Ready pause command sent";
+        RCLCPP_INFO(this->get_logger(), "Ready pause command sent");
+      }
+      break;
+      
+    case ExecutionState::IDLE:
+      response->success = false;
+      response->message = "No action is currently executing";
+      RCLCPP_WARN(this->get_logger(), "Pause requested but no action is executing");
+      break;
+  }
+}
+
+void PickPlaceManagerNode::resumeCallback(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+  (void)request;
+  
+  RCLCPP_INFO(this->get_logger(), "Unified resume requested, current state: %d", static_cast<int>(current_state_));
+  
+  switch (current_state_) {
+    case ExecutionState::EXECUTING_PICK:
+      {
+        if (!pick_resume_client_->service_is_ready()) {
+          response->success = false;
+          response->message = "Pick resume service not available";
+          RCLCPP_ERROR(this->get_logger(), "Pick resume service not available");
+          return;
+        }
+        
+        // Fire-and-forget: 응답을 기다리지 않음 (executor가 재계획 중일 수 있으므로)
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        pick_resume_client_->async_send_request(req);
+        
+        response->success = true;
+        response->message = "Pick resume command sent";
+        RCLCPP_INFO(this->get_logger(), "Pick resume command sent");
+      }
+      break;
+      
+    case ExecutionState::EXECUTING_PLACE:
+      {
+        if (!place_resume_client_->service_is_ready()) {
+          response->success = false;
+          response->message = "Place resume service not available";
+          RCLCPP_ERROR(this->get_logger(), "Place resume service not available");
+          return;
+        }
+        
+        // Fire-and-forget: 응답을 기다리지 않음
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        place_resume_client_->async_send_request(req);
+        
+        response->success = true;
+        response->message = "Place resume command sent";
+        RCLCPP_INFO(this->get_logger(), "Place resume command sent");
+      }
+      break;
+      
+    case ExecutionState::EXECUTING_READY:
+      {
+        if (!ready_resume_client_->service_is_ready()) {
+          response->success = false;
+          response->message = "Ready resume service not available";
+          RCLCPP_ERROR(this->get_logger(), "Ready resume service not available");
+          return;
+        }
+        
+        // Fire-and-forget: 응답을 기다리지 않음
+        auto req = std::make_shared<std_srvs::srv::Trigger::Request>();
+        ready_resume_client_->async_send_request(req);
+        
+        response->success = true;
+        response->message = "Ready resume command sent";
+        RCLCPP_INFO(this->get_logger(), "Ready resume command sent");
+      }
+      break;
+      
+    case ExecutionState::IDLE:
+      response->success = false;
+      response->message = "No action is currently paused";
+      RCLCPP_WARN(this->get_logger(), "Resume requested but no action is paused");
+      break;
+  }
 }
 
 }  // namespace ur_pick_and_place

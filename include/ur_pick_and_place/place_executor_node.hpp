@@ -6,11 +6,13 @@
 #include <ur_pick_and_place/action/place.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <ur_pick_and_place/srv/gripper_control.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <memory>
+#include <atomic>
 
 namespace ur_pick_and_place
 {
@@ -24,12 +26,32 @@ public:
   explicit PlaceExecutorNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
 private:
+  // Place 단계 정의
+  enum class PlaceStep {
+    IDLE,
+    MOVING_TO_PLACE_POSITION,
+    APPROACHING,
+    DROPPING,
+    RETREATING,
+    COMPLETED
+  };
+
   rclcpp_action::Server<PlaceAction>::SharedPtr action_server_;
   rclcpp::Client<ur_pick_and_place::srv::GripperControl>::SharedPtr gripper_client_;
   
   std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm_;
   std::unique_ptr<moveit::planning_interface::PlanningSceneInterface> planning_scene_interface_;
   
+  // Pause/Resume 관련
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
+  std::atomic<bool> is_paused_{false};
+  std::atomic<bool> is_resuming_{false};
+  PlaceStep paused_step_{PlaceStep::IDLE};
+  geometry_msgs::msg::Pose paused_target_;
+  std::mutex pause_mutex_;
+  
+  // Action 관련
   rclcpp_action::GoalResponse handleGoal(
     const rclcpp_action::GoalUUID & uuid,
     std::shared_ptr<const PlaceAction::Goal> goal);
@@ -38,11 +60,28 @@ private:
   void handleAccepted(const std::shared_ptr<GoalHandlePlace> goal_handle);
   void executePlace(const std::shared_ptr<GoalHandlePlace> goal_handle);
   
+  // Place 동작 단계별 함수
   bool moveToPlacePosition(const geometry_msgs::msg::Pose & target_pose);
   bool approachPlacePosition(const geometry_msgs::msg::Pose & target_pose);
   bool dropObject();
   bool retreatFromPlacePosition(const geometry_msgs::msg::Pose & target_pose);
   
+  // Pause/Resume 관련 함수
+  void pauseCallback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  void resumeCallback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  bool executeTrajectoryWithPause(
+    const moveit_msgs::msg::RobotTrajectory & trajectory,
+    PlaceStep current_step);
+  bool executePlanWithPause(
+    const moveit::planning_interface::MoveGroupInterface::Plan & plan,
+    PlaceStep current_step);
+  void checkPauseAndWait();
+  
+  // Setup 함수
   void setupPlanningScene();
   void setupMoveGroup();
 };

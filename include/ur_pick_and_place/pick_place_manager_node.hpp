@@ -24,6 +24,14 @@ public:
   explicit PickPlaceManagerNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
 private:
+  // 현재 실행 상태 추적
+  enum class ExecutionState {
+    IDLE,
+    EXECUTING_READY,
+    EXECUTING_PICK,
+    EXECUTING_PLACE
+  };
+
   rclcpp_action::Client<PickAction>::SharedPtr pick_action_client_;
   rclcpp_action::Client<PlaceAction>::SharedPtr place_action_client_;
   
@@ -36,8 +44,27 @@ private:
 
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_client_;
   
+  // Pause/Resume 통합 제어
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr pick_pause_client_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr pick_resume_client_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr place_pause_client_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr place_resume_client_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_pause_client_;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_resume_client_;
+  ExecutionState current_state_{ExecutionState::IDLE};
+  
   void initializeHardcodedPlaceGoal();
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+  
+  // Pause/Resume 콜백
+  void pauseCallback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  void resumeCallback(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   
   void executePickAndPlaceSequence();
   void sendPickGoal();
