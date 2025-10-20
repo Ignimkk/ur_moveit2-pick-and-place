@@ -15,19 +15,10 @@ PickPlaceManagerNode::PickPlaceManagerNode(const rclcpp::NodeOptions & options)
   place_action_client_ = rclcpp_action::create_client<PlaceAction>(
     this, "place_action");
     
-  // 구독자 설정 (internal goal만 처리)
+  // 구독자 설정 - Pick goal만 수신
   pick_goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
     "/internal/pick_goal", 10,
     std::bind(&PickPlaceManagerNode::pickGoalCallback, this, std::placeholders::_1));
-    
-  place_goal_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/internal/place_goal", 10,
-    std::bind(&PickPlaceManagerNode::placeGoalCallback, this, std::placeholders::_1));
-    
-  // Trigger 구독자 제거 - goal receiver가 이미 적절한 순서로 goal 발행
-  // trigger_sub_ = this->create_subscription<std_msgs::msg::String>(
-  //   "/pick_place_trigger", 10,
-  //   std::bind(&PickPlaceManagerNode::triggerCallback, this, std::placeholders::_1));
     
   // 발행자 설정
   status_pub_ = this->create_publisher<std_msgs::msg::String>("/pick_place_status", 10);
@@ -35,7 +26,29 @@ PickPlaceManagerNode::PickPlaceManagerNode(const rclcpp::NodeOptions & options)
   // Ready 서비스 클라이언트
   ready_client_ = this->create_client<std_srvs::srv::Trigger>("/ready/move");
 
-  RCLCPP_INFO(this->get_logger(), "Pick Place Manager Node initialized");
+  // 하드코딩된 place 위치 초기화
+  initializeHardcodedPlaceGoal();
+
+  RCLCPP_INFO(this->get_logger(), "Pick Place Manager Node initialized (hardcoded place position)");
+}
+
+void PickPlaceManagerNode::initializeHardcodedPlaceGoal()
+{
+  // 하드코딩된 place 위치 설정
+  current_place_goal_ = std::make_shared<geometry_msgs::msg::PoseStamped>();
+  current_place_goal_->header.frame_id = "base_link";
+  current_place_goal_->pose.position.x = -0.340;
+  current_place_goal_->pose.position.y = 0.310;
+  current_place_goal_->pose.position.z = 0.264;
+  current_place_goal_->pose.orientation.w = 1.0;
+  current_place_goal_->pose.orientation.x = 0.0;
+  current_place_goal_->pose.orientation.y = 0.0;
+  current_place_goal_->pose.orientation.z = 0.0;
+  
+  RCLCPP_INFO(this->get_logger(), "Hardcoded place position set: x=%.3f, y=%.3f, z=%.3f",
+              current_place_goal_->pose.position.x,
+              current_place_goal_->pose.position.y,
+              current_place_goal_->pose.position.z);
 }
 
 void PickPlaceManagerNode::pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -43,27 +56,9 @@ void PickPlaceManagerNode::pickGoalCallback(const geometry_msgs::msg::PoseStampe
   current_pick_goal_ = msg;
   RCLCPP_INFO(this->get_logger(), "Manager received pick goal");
   
-  // Pick과 place는 반드시 함께 실행되어야 함
-  if (current_place_goal_) {
-    RCLCPP_INFO(this->get_logger(), "Both pick and place goals available, starting pick and place sequence");
-    executePickAndPlaceSequence();
-  } else {
-    RCLCPP_INFO(this->get_logger(), "Pick goal stored, waiting for place goal (pick-only execution not allowed)");
-  }
-}
-
-void PickPlaceManagerNode::placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
-{
-  current_place_goal_ = msg;
-  RCLCPP_INFO(this->get_logger(), "Manager received place goal");
-  
-  // Pick과 place는 반드시 함께 실행되어야 함  
-  if (current_pick_goal_) {
-    RCLCPP_INFO(this->get_logger(), "Both pick and place goals available, starting pick and place sequence");
-    executePickAndPlaceSequence();
-  } else {
-    RCLCPP_INFO(this->get_logger(), "Place goal stored, waiting for pick goal (place-only execution not allowed)");
-  }
+  // Pick goal을 받으면 바로 시퀀스 시작 (place는 이미 하드코딩됨)
+  RCLCPP_INFO(this->get_logger(), "Pick goal received, starting pick and place sequence with hardcoded place position");
+  executePickAndPlaceSequence();
 }
 
 void PickPlaceManagerNode::executePickAndPlaceSequence()

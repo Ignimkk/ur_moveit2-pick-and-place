@@ -28,17 +28,16 @@ private:
   rclcpp_action::Client<PlaceAction>::SharedPtr place_action_client_;
   
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pick_goal_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr place_goal_sub_;
   
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   
   geometry_msgs::msg::PoseStamped::SharedPtr current_pick_goal_;
-  geometry_msgs::msg::PoseStamped::SharedPtr current_place_goal_;
+  geometry_msgs::msg::PoseStamped::SharedPtr current_place_goal_;  // 하드코딩된 위치 저장
 
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_client_;
   
+  void initializeHardcodedPlaceGoal();
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
-  void placeGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   
   void executePickAndPlaceSequence();
   void sendPickGoal();
