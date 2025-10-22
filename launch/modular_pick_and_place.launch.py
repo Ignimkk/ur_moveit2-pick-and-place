@@ -16,11 +16,18 @@ def generate_launch_description():
         description='Use simulation time'
     )
     
+    use_cartesian_path_arg = DeclareLaunchArgument(
+        'use_cartesian_path',
+        default_value='true',
+        description='Use Cartesian path planning (true) or RRT only (false)'
+    )
+    
     # Get package directory
     pkg_share = FindPackageShare('ur_pick_and_place')
     
     # Launch configuration
     use_sim_time = LaunchConfiguration('use_sim_time')
+    use_cartesian_path = LaunchConfiguration('use_cartesian_path')
     
     # Goal Receiver Node
     goal_receiver_node = Node(
@@ -55,7 +62,10 @@ def generate_launch_description():
         executable='pick_executor_node',
         name='pick_executor_node',
         output='screen',
-        parameters=[{'use_sim_time': use_sim_time}]
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'use_cartesian_path': use_cartesian_path
+        }]
     )
     
     # Place Executor Node
@@ -78,6 +88,7 @@ def generate_launch_description():
     
     return LaunchDescription([
         use_sim_time_arg,
+        use_cartesian_path_arg,
         goal_receiver_node,
         gripper_controller_node,
         ready_executor_node,

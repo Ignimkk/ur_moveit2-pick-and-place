@@ -47,6 +47,10 @@ void ReadyExecutorNode::setupMoveGroup()
   move_group_arm_->setPlanningTime(20.0);
   move_group_arm_->setNumPlanningAttempts(5);
   move_group_arm_->setGoalTolerance(0.01);
+  
+  // Ready pose로 복귀할 때 빠른 속도 (물체를 들고 있지 않으므로 안전)
+  move_group_arm_->setMaxVelocityScalingFactor(0.8);      // 80% 속도
+  move_group_arm_->setMaxAccelerationScalingFactor(0.8);  // 80% 가속도
 }
 
 void ReadyExecutorNode::setupPlanningScene()

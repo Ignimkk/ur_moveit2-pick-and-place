@@ -44,11 +44,24 @@ void PlaceExecutorNode::setupMoveGroup()
     
   planning_scene_interface_ = std::make_unique<moveit::planning_interface::PlanningSceneInterface>();
   
-  // 플래너 설정 (더 유연하게)
-  move_group_arm_->setPlannerId("RRTConnect"); // RRTConnect가 더 안정적
-  move_group_arm_->setPlanningTime(20.0); // Planning 시간 증가
-  move_group_arm_->setNumPlanningAttempts(5); // 재시도 횟수 증가
-  move_group_arm_->setGoalTolerance(0.01); // 목표 허용 오차 증가
+  // 플래너 설정
+  move_group_arm_->setPlannerId("RRTConnect");
+  move_group_arm_->setPlanningTime(15.0);  // 충분한 시간을 주어 더 나은 경로 탐색
+  move_group_arm_->setNumPlanningAttempts(3);  // 여러 경로 중 최선 선택
+  move_group_arm_->setGoalTolerance(0.01);
+  
+  // 최소 움직임을 위한 최적화 설정
+  move_group_arm_->setMaxVelocityScalingFactor(0.2);  // 느린 속도로 부드러운 움직임
+  move_group_arm_->setMaxAccelerationScalingFactor(0.2);  // 느린 가속으로 부드러운 움직임
+  
+  // Goal tolerance를 세밀하게 설정
+  move_group_arm_->setGoalPositionTolerance(0.005);  // 5mm
+  move_group_arm_->setGoalOrientationTolerance(0.01);  // ~0.57도
+  
+  // Planning pipeline 파라미터 설정 (최소 움직임 강조)
+  // 이 설정들은 trajectory를 단순화하고 불필요한 움직임 제거
+  move_group_arm_->allowReplanning(true);  // 더 나은 경로를 찾으면 재계획
+  move_group_arm_->allowLooking(true);  // 환경 정보 활용
   
   RCLCPP_INFO(this->get_logger(), "Planning frame: %s", move_group_arm_->getPlanningFrame().c_str());
   RCLCPP_INFO(this->get_logger(), "End effector link: %s", move_group_arm_->getEndEffectorLink().c_str());

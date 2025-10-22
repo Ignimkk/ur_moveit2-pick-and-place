@@ -31,7 +31,6 @@ private:
     IDLE,
     MOVING_TO_PICK_POSITION,
     OPENING_GRIPPER,
-    DESCENDING,
     CLOSING_GRIPPER,
     ASCENDING,
     COMPLETED
@@ -42,6 +41,14 @@ private:
   
   std::unique_ptr<moveit::planning_interface::MoveGroupInterface> move_group_arm_;
   std::unique_ptr<moveit::planning_interface::PlanningSceneInterface> planning_scene_interface_;
+  
+  // Planning 전략 파라미터
+  bool use_cartesian_path_;  // true: Cartesian Path 우선, false: RRT만 사용
+  
+  // Parameter callback
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_;
+  rcl_interfaces::msg::SetParametersResult parametersCallback(
+    const std::vector<rclcpp::Parameter> & parameters);
   
   // Pause/Resume 관련
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
@@ -63,7 +70,6 @@ private:
   
   // Pick 동작 단계별 함수
   bool moveToPickPosition(const geometry_msgs::msg::Pose & target_pose);
-  bool descendToTarget(const geometry_msgs::msg::Pose & target_pose);
   bool ascendFromTarget(const geometry_msgs::msg::Pose & target_pose);
   
   // Pause/Resume 관련 함수

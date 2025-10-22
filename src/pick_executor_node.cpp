@@ -9,6 +9,10 @@ namespace ur_pick_and_place
 PickExecutorNode::PickExecutorNode(const rclcpp::NodeOptions & options)
 : Node("pick_executor_node", options)
 {
+  // 파라미터 선언 및 가져오기
+  this->declare_parameter<bool>("use_cartesian_path", true);
+  use_cartesian_path_ = this->get_parameter("use_cartesian_path").as_bool();
+  
   // MoveIt 설정
   setupMoveGroup();
   setupPlanningScene();
@@ -37,7 +41,13 @@ PickExecutorNode::PickExecutorNode(const rclcpp::NodeOptions & options)
     "~/resume",
     std::bind(&PickExecutorNode::resumeCallback, this, std::placeholders::_1, std::placeholders::_2));
 
+  // Parameter callback 등록 (런타임에 파라미터 변경 가능)
+  param_callback_handle_ = this->add_on_set_parameters_callback(
+    std::bind(&PickExecutorNode::parametersCallback, this, std::placeholders::_1));
+  
   RCLCPP_INFO(this->get_logger(), "Pick Executor Node initialized with pause/resume support");
+  RCLCPP_INFO(this->get_logger(), "Planning strategy: %s", 
+              use_cartesian_path_ ? "Cartesian Path (with RRT fallback)" : "RRT only");
 }
 
 void PickExecutorNode::setupMoveGroup()
@@ -49,11 +59,16 @@ void PickExecutorNode::setupMoveGroup()
     
   planning_scene_interface_ = std::make_unique<moveit::planning_interface::PlanningSceneInterface>();
   
-  // 플래너 설정 (더 유연하게)
-  move_group_arm_->setPlannerId("RRTConnect"); // RRTConnect가 더 안정적
-  move_group_arm_->setPlanningTime(20.0); // Planning 시간 증가
-  move_group_arm_->setNumPlanningAttempts(5); // 재시도 횟수 증가
-  move_group_arm_->setGoalTolerance(0.01); // 목표 허용 오차 증가
+  // Trajectory 실행 설정 (Cartesian Path와 Standard Planning 모두에 영향)
+  move_group_arm_->setMaxVelocityScalingFactor(0.2);      // 느린 속도로 부드러운 움직임
+  move_group_arm_->setMaxAccelerationScalingFactor(0.2);  // 느린 가속으로 부드러운 움직임
+  
+  // Fallback 플래너 설정 (Cartesian Path 실패 시만 사용)
+  move_group_arm_->setPlannerId("RRTConnect");            // 기본 플래너
+  move_group_arm_->setPlanningTime(15.0);                 // Planning 시간
+  move_group_arm_->setNumPlanningAttempts(3);             // 재시도 횟수
+  move_group_arm_->setGoalPositionTolerance(0.005);       // 위치 허용오차 5mm
+  move_group_arm_->setGoalOrientationTolerance(0.01);     // 방향 허용오차 ~0.57도
   
   RCLCPP_INFO(this->get_logger(), "Planning frame: %s", move_group_arm_->getPlanningFrame().c_str());
   RCLCPP_INFO(this->get_logger(), "End effector link: %s", move_group_arm_->getEndEffectorLink().c_str());
@@ -128,9 +143,9 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
     
     // 각 단계 실행
     if (start_step <= PickStep::MOVING_TO_PICK_POSITION) {
-      // 목표지점 + 0.08m 높이로 이동 (준비자세는 manager가 별도 처리)
-      feedback->current_step = "Moving to pick position (0.08m above target)";
-      feedback->completion_percentage = 30.0;
+      // 픽킹 위치로 바로 이동 (준비자세는 manager가 별도 처리)
+      feedback->current_step = "Moving to pick position";
+      feedback->completion_percentage = 40.0;
       goal_handle->publish_feedback(feedback);
       
       if (!moveToPickPosition(target_pose)) {
@@ -149,33 +164,14 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
     if (start_step <= PickStep::OPENING_GRIPPER) {
       // 그리퍼 열기 (추후 구현)
       feedback->current_step = "Opening gripper (placeholder)";
-      feedback->completion_percentage = 40.0;
+      feedback->completion_percentage = 60.0;
       goal_handle->publish_feedback(feedback);
       // TODO: 그리퍼 열기 구현
       checkPauseAndWait();
     }
     
-    if (start_step <= PickStep::DESCENDING) {
-      // 0.08m 하강
-      feedback->current_step = "Descending 0.08m to target position";
-      feedback->completion_percentage = 60.0;
-      goal_handle->publish_feedback(feedback);
-      
-      if (!descendToTarget(target_pose)) {
-        if (is_paused_) {
-          RCLCPP_INFO(this->get_logger(), "Pick action paused at DESCENDING");
-          return;
-        }
-        result->success = false;
-        result->message = "Failed to descend to target position";
-        goal_handle->abort(result);
-        return;
-      }
-      checkPauseAndWait();
-    }
-    
     if (start_step <= PickStep::CLOSING_GRIPPER) {
-      // 그리퍼 닫기 (추후 구현)
+      // 그리퍼 닫기 (잡기)
       feedback->current_step = "Closing gripper (placeholder)";
       feedback->completion_percentage = 80.0;
       goal_handle->publish_feedback(feedback);
@@ -184,8 +180,8 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
     }
     
     if (start_step <= PickStep::ASCENDING) {
-      // 0.08m 상승
-      feedback->current_step = "Ascending 0.08m from target position";
+      // 상승 (0.08m)
+      feedback->current_step = "Ascending from pick position";
       feedback->completion_percentage = 90.0;
       goal_handle->publish_feedback(feedback);
       
@@ -195,7 +191,7 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
           return;
         }
         result->success = false;
-        result->message = "Failed to ascend from target position";
+        result->message = "Failed to ascend from pick position";
         goal_handle->abort(result);
         return;
       }
@@ -233,7 +229,7 @@ void PickExecutorNode::executePick(const std::shared_ptr<GoalHandlePick> goal_ha
 
 bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & target_pose)
 {
-  RCLCPP_INFO(this->get_logger(), "Moving to pick position (0.08m above target)");
+  RCLCPP_INFO(this->get_logger(), "Moving to pick position");
   
   // Pause/Resume 후 재시도를 위한 loop
   while (true) {
@@ -244,7 +240,8 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
     // 2. 현재 상태를 명시적으로 업데이트
     move_group_arm_->setStartStateToCurrentState();
     
-    // 3. 현재 joint 상태 로깅 (디버깅용)
+    // 3. 현재 위치 확인
+    geometry_msgs::msg::PoseStamped current_pose = move_group_arm_->getCurrentPose();
     auto current_joints = move_group_arm_->getCurrentJointValues();
     RCLCPP_INFO(this->get_logger(), "Current joint positions: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]", 
                 current_joints[0], current_joints[1], current_joints[2], 
@@ -256,139 +253,79 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
 
     geometry_msgs::msg::Pose pick_pose = target_pose;
     pick_pose.orientation = ros_orientation;
-    pick_pose.position.z += 0.08; // 목표지점 + 0.08m 높이
-
-    // Planning 설정을 더 유연하게 설정
-    move_group_arm_->setPlanningTime(30.0);  // Planning 시간 증가
-    move_group_arm_->setGoalTolerance(0.02); // 목표 허용 오차 증가
-    move_group_arm_->setNumPlanningAttempts(10); // 재시도 횟수 증가
     
+    // **방법 1: Cartesian Path (파라미터로 활성화/비활성화 가능)**
+    if (use_cartesian_path_) {
+      RCLCPP_INFO(this->get_logger(), "Trying Cartesian path for minimum end-effector travel distance");
+      
+      std::vector<geometry_msgs::msg::Pose> waypoints;
+      waypoints.push_back(pick_pose);
+      
+      moveit_msgs::msg::RobotTrajectory cartesian_trajectory;
+      const double eef_step = 0.01;  // 1cm 단위로 보간
+      const double jump_threshold = 0.0;  // Jump 허용 안함 (직선 경로 강제)
+      
+      double fraction = move_group_arm_->computeCartesianPath(
+          waypoints, eef_step, jump_threshold, cartesian_trajectory);
+      
+      // Cartesian path가 95% 이상 성공하면 사용 (거의 직선 경로)
+      if (fraction > 0.95) {
+        // Cartesian 경로 길이 계산
+        double cart_distance = 0.0;
+        for (size_t i = 1; i < cartesian_trajectory.joint_trajectory.points.size(); ++i) {
+          // 간단한 거리 추정 (joint space distance)
+          double segment_dist = 0.0;
+          for (size_t j = 0; j < 6; ++j) {
+            double diff = cartesian_trajectory.joint_trajectory.points[i].positions[j] - 
+                         cartesian_trajectory.joint_trajectory.points[i-1].positions[j];
+            segment_dist += diff * diff;
+          }
+          cart_distance += std::sqrt(segment_dist);
+        }
+        
+        RCLCPP_INFO(this->get_logger(), 
+                    "Cartesian path planning successful (%.2f%%, waypoints: %zu, distance: %.3f)", 
+                    fraction * 100, cartesian_trajectory.joint_trajectory.points.size(), cart_distance);
+        
+        paused_target_ = target_pose;
+        if (!executeTrajectoryWithPause(cartesian_trajectory, PickStep::MOVING_TO_PICK_POSITION)) {
+          RCLCPP_INFO(this->get_logger(), "Paused and resumed, replanning from current position");
+          continue;
+        }
+        rclcpp::sleep_for(std::chrono::seconds(2));
+        return true;
+      }
+      
+      RCLCPP_WARN(this->get_logger(), 
+                  "Cartesian path incomplete (%.2f%%), falling back to standard planning", fraction * 100);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Cartesian path disabled, using standard planning (RRT)");
+    }
+
+    // **방법 2: Standard Planning (RRT - setupMoveGroup에서 설정한 기본 플래너 사용)**
+    // setupMoveGroup()에서 이미 RRTConnect, planning time, goal tolerance 등 설정됨
     move_group_arm_->setPoseTarget(pick_pose);
     
     moveit::planning_interface::MoveGroupInterface::Plan my_plan;
     bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
     
     if (success) {
-      RCLCPP_INFO(this->get_logger(), "Pick position planning successful");
-      // Pause 지원하는 실행으로 변경
-      paused_target_ = target_pose;  // Resume을 위해 목표 저장
+      auto trajectory = my_plan.trajectory_;
+      size_t num_points = trajectory.joint_trajectory.points.size();
+      RCLCPP_INFO(this->get_logger(), 
+                  "Standard planning successful (waypoints: %zu)", num_points);
+      
+      paused_target_ = target_pose;
       if (!executePlanWithPause(my_plan, PickStep::MOVING_TO_PICK_POSITION)) {
-        // Pause되었다가 resume됨 - 재계획하여 다시 시도
         RCLCPP_INFO(this->get_logger(), "Paused and resumed, replanning from current position");
-        continue;  // 처음부터 다시 (현재 위치에서 재계획)
+        continue;
       }
       rclcpp::sleep_for(std::chrono::seconds(2));
       return true;
-    } else {
-      RCLCPP_WARN(this->get_logger(), "Initial pick position planning failed, trying with different planner");
-      
-      // Fallback 1: 다른 플래너 시도
-      move_group_arm_->setPlannerId("RRTstar");
-      move_group_arm_->setPlanningTime(40.0);
-      success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
-      
-      if (success) {
-        RCLCPP_INFO(this->get_logger(), "Pick position planning successful with RRTstar");
-        paused_target_ = target_pose;
-        if (!executePlanWithPause(my_plan, PickStep::MOVING_TO_PICK_POSITION)) {
-          // Pause/Resume - 재시도
-          move_group_arm_->setPlannerId("RRTConnect");
-          continue;
-        }
-        rclcpp::sleep_for(std::chrono::seconds(2));
-        // 원래 플래너로 복원
-        move_group_arm_->setPlannerId("RRTConnect");
-        return true;
-      }
-      
-      // Fallback 2: 더 높은 위치에서 시도 (0.12m 높이)
-      RCLCPP_WARN(this->get_logger(), "Trying higher pick position (0.12m above target)");
-      pick_pose.position.z = target_pose.position.z + 0.12;
-      move_group_arm_->setPoseTarget(pick_pose);
-      move_group_arm_->setPlannerId("RRTConnect");
-      
-      success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
-      
-      if (success) {
-        RCLCPP_INFO(this->get_logger(), "Pick position planning successful at higher position");
-        paused_target_ = target_pose;
-        if (!executePlanWithPause(my_plan, PickStep::MOVING_TO_PICK_POSITION)) {
-          // Pause/Resume - 재시도
-          continue;
-        }
-        rclcpp::sleep_for(std::chrono::seconds(2));
-        return true;
-      }
-      
-      RCLCPP_ERROR(this->get_logger(), "All pick position planning attempts failed!");
-      return false;
     }
-  } // end while
-}
-
-bool PickExecutorNode::descendToTarget(const geometry_msgs::msg::Pose & target_pose)
-{
-  RCLCPP_INFO(this->get_logger(), "Approach to object!");
-  
-  // Pause/Resume 후 재시도 loop
-  while (true) {
-    tf2::Quaternion orientation;
-    orientation.setRPY(0, -PI, 0);
-    geometry_msgs::msg::Quaternion ros_orientation = tf2::toMsg(orientation);
     
-    std::vector<geometry_msgs::msg::Pose> approach_waypoints;
-    geometry_msgs::msg::Pose approach_pose = target_pose;
-    approach_pose.orientation = ros_orientation;
-    
-    // 첫 번째 waypoint: target_pose + 0.04m (중간 지점)
-    approach_pose.position.z += 0.04;
-    approach_waypoints.push_back(approach_pose);
-    
-    // 두 번째 waypoint: target_pose (최종 목표)
-    approach_pose.position.z -= 0.04;
-    approach_waypoints.push_back(approach_pose);
-
-    moveit_msgs::msg::RobotTrajectory trajectory_approach;
-    const double jump_threshold = 0.0;
-    const double eef_step = 0.01;
-
-    double fraction = move_group_arm_->computeCartesianPath(
-        approach_waypoints, eef_step, jump_threshold, trajectory_approach);
-
-    if (fraction > 0.98) {
-      RCLCPP_INFO(this->get_logger(), "Approach Cartesian path planning successful (%.2f%%)", fraction * 100);
-      paused_target_ = target_pose;
-      if (!executeTrajectoryWithPause(trajectory_approach, PickStep::DESCENDING)) {
-        continue;  // Pause/Resume - 재시도
-      }
-      rclcpp::sleep_for(std::chrono::seconds(1));
-      return true;
-    } else {
-      RCLCPP_ERROR(this->get_logger(), "Approach Cartesian path planning failed! (%.2f%%)", fraction * 100);
-      
-      // Fallback: 직접 목표 위치로 이동
-      geometry_msgs::msg::Pose final_target = target_pose;
-      final_target.orientation = ros_orientation;
-      
-      move_group_arm_->setStartStateToCurrentState();
-      move_group_arm_->setPoseTarget(final_target);
-      
-      moveit::planning_interface::MoveGroupInterface::Plan descend_plan;
-      bool success = (move_group_arm_->plan(descend_plan) == moveit::core::MoveItErrorCode::SUCCESS);
-      
-      if (success) {
-        RCLCPP_INFO(this->get_logger(), "Descend pose target planning successful");
-        paused_target_ = target_pose;
-        if (!executePlanWithPause(descend_plan, PickStep::DESCENDING)) {
-          continue;  // Pause/Resume - 재시도
-        }
-        rclcpp::sleep_for(std::chrono::seconds(1));
-        return true;
-      } else {
-        RCLCPP_ERROR(this->get_logger(), "Both Cartesian and pose target descend planning failed!");
-        return false;
-      }
-    }
+    RCLCPP_ERROR(this->get_logger(), "All pick position planning attempts failed!");
+    return false;
   } // end while
 }
 
@@ -496,6 +433,33 @@ void PickExecutorNode::resumeCallback(
   response->success = true;
   response->message = "Pick action resumed";
   RCLCPP_INFO(this->get_logger(), "Pick action resumed");
+}
+
+rcl_interfaces::msg::SetParametersResult PickExecutorNode::parametersCallback(
+  const std::vector<rclcpp::Parameter> & parameters)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  
+  for (const auto & param : parameters) {
+    if (param.get_name() == "use_cartesian_path") {
+      if (param.get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
+        bool new_value = param.as_bool();
+        if (use_cartesian_path_ != new_value) {
+          use_cartesian_path_ = new_value;
+          RCLCPP_INFO(this->get_logger(), 
+                      "Planning strategy changed to: %s", 
+                      use_cartesian_path_ ? "Cartesian Path (with RRT fallback)" : "RRT only");
+          result.reason = "Planning strategy updated";
+        }
+      } else {
+        result.successful = false;
+        result.reason = "use_cartesian_path must be a boolean";
+      }
+    }
+  }
+  
+  return result;
 }
 
 void PickExecutorNode::checkPauseAndWait()
