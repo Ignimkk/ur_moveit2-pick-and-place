@@ -2,21 +2,38 @@
 
 이 패키지는 UR 로봇을 위한 모듈화된 Pick & Place 시스템입니다. 기존의 하드코딩된 단일 파일 구조에서 ROS2의 모듈화된 아키텍처로 리팩토링되었습니다.
 
-## 최신 업데이트 (v3.0)
+## 최신 업데이트 (v4.0) 🚀
 
-### 🎯 주요 개선사항
-- **⏸️ Pause/Resume 기능**: 모든 작업 단계에서 일시정지 및 재개 가능
-  - **즉시 정지**: 명령 수신 후 100-200ms 내 정지
-  - **통합 명령**: 단일 서비스로 현재 실행 중인 작업 제어
-  - **재계획 기능**: Resume 시 현재 위치에서 목표까지 새로운 경로 생성
-  - **모든 단계 지원**: Ready 이동, Pick, Place 전 단계에서 작동
-- **Gazebo 제거**: 물리 시뮬레이션 없이 Fake Hardware로 경량 실행
-- **통합 런치 파일**: `fake_hardware_pick_and_place.launch.py`로 모든 것을 한 번에 실행
-- **RViz 시각화**: Gazebo 대신 RViz만으로 로봇 동작 확인
-- **빠른 개발/테스트**: 시뮬레이션 부하 없이 빠른 응답 속도
-- **표준 UR 패키지 활용**: `ur_bringup`과 `ur_moveit_config` 사용 가능
+###  Motion Planning 최적화
+
+####  Cartesian Path Planning (직선 경로)
+- **최소 이동거리**: 엔드이펙터가 직선으로 이동하여 최단 거리 보장
+- **자동 Fallback**: Cartesian 불가능 시 RRT-Connect로 자동 전환
+- **Runtime 제어**: 실행 중 planning 전략 변경 가능
+  ```bash
+  # Cartesian Path 사용 (기본값)
+  ros2 launch ur_pick_and_place modular_pick_and_place.launch.py use_cartesian_path:=true
+  
+  # RRT만 사용
+  ros2 launch ur_pick_and_place modular_pick_and_place.launch.py use_cartesian_path:=false
+  
+  # 런타임 변경
+  ros2 param set /pick_executor_node use_cartesian_path false
+  ```
+
+#### 속도 최적화 (각 단계별 최적화)
+- **Pick 동작**: 0.8 속도/가속도 (물체 없음, 빠르게)
+- **Place 동작**: 0.2 속도/가속도 (물체 들고 있음, 안전하게)
+- **Ready 복귀**: 0.8 속도/가속도 (물체 없음, 빠르게)
+
+#### RRT 파라미터 최적화
+- **Range**: 0.05 (작은 값으로 부드러운 조인트 회전)
+- **Segment Fraction**: 0.005 (더 세밀한 경로 검증)
+- **Joint Space Planning**: 직접 joint space에서 계획하여 불필요한 회전 최소화
+
 
 ### 📜 이전 버전 주요 기능
+- **v3.0**: Pause/Resume 기능, Gazebo 제거, Fake Hardware, 통합 런치 파일
 - **v2.1**: Place 위치 하드코딩, Pick only 입력
 - **v2.0**: 실물 로봇 지원, Ready Position 노드, 안전 데모 스크립트
 - **v1.1**: 단일 파일 빌드 구조, 자동 시퀀스 관리
@@ -92,6 +109,12 @@ ros2 launch ur_pick_and_place fake_hardware_pick_and_place.launch.py
 # RViz 없이 실행
 ros2 launch ur_pick_and_place fake_hardware_pick_and_place.launch.py launch_rviz:=false
 
+# v4.0: Cartesian Path 사용 (기본값, 직선 경로로 최단 거리)
+ros2 launch ur_pick_and_place fake_hardware_pick_and_place.launch.py use_cartesian_path:=true
+
+# v4.0: RRT만 사용 (Cartesian Path 비활성화)
+ros2 launch ur_pick_and_place fake_hardware_pick_and_place.launch.py use_cartesian_path:=false
+
 # 자동 테스트 실행
 ros2 run ur_pick_and_place test_modular_system.py
 ```
@@ -107,7 +130,8 @@ ros2 launch ur_bringup ur5e.launch.py \
 # 터미널 2: MoveIt with RViz
 ros2 launch ur_moveit_config ur_moveit.launch.py \
     ur_type:=ur5e \
-    launch_rviz:=false
+    launch_rviz:=false \
+    use_cartesian_path:=true
 
 # 터미널 3: Pick and Place 노드들
 ros2 launch ur_pick_and_place modular_pick_and_place.launch.py use_sim_time:=false
@@ -272,6 +296,47 @@ ros2 service call /pick_place/resume std_srvs/srv/Trigger
 - Pause/Resume은 모션 실행 중에만 작동합니다
 - Gripper 동작(잡기/놓기) 중에는 정지할 수 없습니다
 - 재개 시 로봇의 현재 위치가 목표까지 도달 가능한지 자동으로 확인합니다
+
+### 🎛️ Planning 전략 제어 (v4.0 신규)
+
+실행 중에 motion planning 전략을 동적으로 변경할 수 있습니다.
+
+#### 런타임 파라미터 변경
+```bash
+# 현재 설정 확인
+ros2 param get /pick_executor_node use_cartesian_path
+# 출력: Boolean value is: True
+
+# Cartesian Path 사용 (직선 경로, 최단 거리)
+ros2 param set /pick_executor_node use_cartesian_path true
+# 출력: Set parameter successful
+# 노드 로그: [pick_executor_node]: Planning strategy changed to: Cartesian Path (with RRT fallback)
+
+# RRT만 사용 (유연한 경로, Cartesian 불가능한 경우)
+ros2 param set /pick_executor_node use_cartesian_path false
+# 출력: Set parameter successful
+# 노드 로그: [pick_executor_node]: Planning strategy changed to: RRT only
+```
+
+#### GUI로 파라미터 변경
+```bash
+# rqt 실행
+rqt
+
+# Plugins → Configuration → Dynamic Reconfigure 선택
+# /pick_executor_node 선택 → use_cartesian_path 체크박스로 변경
+```
+
+#### Planning 전략 비교
+| 전략 | 장점 | 단점 | 사용 시기 |
+|------|------|------|----------|
+| **Cartesian Path** | 직선 경로, 최단 거리, 예측 가능 | 장애물 회피 제한적 | 장애물 없는 환경, 최소 이동 필요 |
+| **RRT-Connect** | 복잡한 경로 가능, 장애물 회피 우수 | 경로 길이 최적화 안됨 | 복잡한 환경, Cartesian 불가 시 |
+
+**💡 추천**: 
+- 기본값 `true` (Cartesian) 사용: 대부분의 경우 직선 경로가 최적
+- Cartesian 실패 시 자동으로 RRT로 fallback되므로 안전함
+- 특수한 경우에만 `false`로 변경하여 RRT만 사용
 
 ### 수동 토픽 전송
 
