@@ -7,8 +7,8 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <ur_pick_and_place/srv/gripper_control.hpp>
 #include <std_srvs/srv/trigger.hpp>
-#include <moveit/move_group_interface/move_group_interface.h>
-#include <moveit/planning_scene_interface/planning_scene_interface.h>
+#include <moveit/move_group_interface/move_group_interface.hpp>
+#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <memory>

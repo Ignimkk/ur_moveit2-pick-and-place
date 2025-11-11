@@ -23,12 +23,12 @@ ReadyExecutorNode::ReadyExecutorNode(const rclcpp::NodeOptions & options)
   pause_service_ = this->create_service<std_srvs::srv::Trigger>(
     "~/pause",
     std::bind(&ReadyExecutorNode::pauseCallback, this, std::placeholders::_1, std::placeholders::_2),
-    rmw_qos_profile_services_default,
+    rclcpp::QoS(rclcpp::ServicesQoS()),
     pause_resume_callback_group_);
   resume_service_ = this->create_service<std_srvs::srv::Trigger>(
     "~/resume",
     std::bind(&ReadyExecutorNode::resumeCallback, this, std::placeholders::_1, std::placeholders::_2),
-    rmw_qos_profile_services_default,
+    rclcpp::QoS(rclcpp::ServicesQoS()),
     pause_resume_callback_group_);
 
   RCLCPP_INFO(this->get_logger(), "Ready Executor Node initialized with pause/resume support");

@@ -52,8 +52,8 @@ ament_target_dependencies(ur_pick_and_place_moveit
 )
 
 # Link action interfaces to the executable that uses them
-rosidl_target_interfaces(ur_pick_and_place_moveit
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
+target_link_libraries(ur_pick_and_place_moveit "${cpp_typesupport_target}")
 
 # Create individual executables for modular nodes
 add_executable(goal_receiver_node 
@@ -161,20 +161,11 @@ target_include_directories(ready_executor_node PUBLIC
 )
 
 # Link interfaces to modular node executables
-rosidl_target_interfaces(goal_receiver_node
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-rosidl_target_interfaces(gripper_controller_node
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-rosidl_target_interfaces(pick_executor_node
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-rosidl_target_interfaces(place_executor_node
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-rosidl_target_interfaces(pick_place_manager_node
-  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(goal_receiver_node "${cpp_typesupport_target}")
+target_link_libraries(gripper_controller_node "${cpp_typesupport_target}")
+target_link_libraries(pick_executor_node "${cpp_typesupport_target}")
+target_link_libraries(place_executor_node "${cpp_typesupport_target}")
+target_link_libraries(pick_place_manager_node "${cpp_typesupport_target}")
 
 # Install targets
 install(TARGETS 

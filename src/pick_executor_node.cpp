@@ -263,10 +263,9 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
       
       moveit_msgs::msg::RobotTrajectory cartesian_trajectory;
       const double eef_step = 0.01;  // 1cm 단위로 보간
-      const double jump_threshold = 0.0;  // Jump 허용 안함 (직선 경로 강제)
       
       double fraction = move_group_arm_->computeCartesianPath(
-          waypoints, eef_step, jump_threshold, cartesian_trajectory);
+          waypoints, eef_step, cartesian_trajectory);
       
       // Cartesian path가 95% 이상 성공하면 사용 (거의 직선 경로)
       if (fraction > 0.95) {
@@ -310,7 +309,7 @@ bool PickExecutorNode::moveToPickPosition(const geometry_msgs::msg::Pose & targe
     bool success = (move_group_arm_->plan(my_plan) == moveit::core::MoveItErrorCode::SUCCESS);
     
     if (success) {
-      auto trajectory = my_plan.trajectory_;
+      auto trajectory = my_plan.trajectory;
       size_t num_points = trajectory.joint_trajectory.points.size();
       RCLCPP_INFO(this->get_logger(), 
                   "Standard planning successful (waypoints: %zu)", num_points);
@@ -350,11 +349,10 @@ bool PickExecutorNode::ascendFromTarget(const geometry_msgs::msg::Pose & target_
   retreat_waypoints.push_back(retreat_pose);
 
   moveit_msgs::msg::RobotTrajectory trajectory_retreat;
-  const double jump_threshold = 0.0;
   const double eef_step = 0.01;
 
   double fraction = move_group_arm_->computeCartesianPath(
-      retreat_waypoints, eef_step, jump_threshold, trajectory_retreat);
+      retreat_waypoints, eef_step, trajectory_retreat);
 
   if (fraction > 0.98) {
     RCLCPP_INFO(this->get_logger(), "Retreat Cartesian path planning successful (%.2f%%)", fraction * 100);

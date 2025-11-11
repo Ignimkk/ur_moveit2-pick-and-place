@@ -265,11 +265,10 @@ bool PlaceExecutorNode::moveToPlacePosition(const geometry_msgs::msg::Pose & tar
     carry_waypoints.push_back(carry_pose);
     
     moveit_msgs::msg::RobotTrajectory trajectory;
-    const double jump_threshold = 0.0;
     const double eef_step = 0.01;
     
     double fraction = move_group_arm_->computeCartesianPath(
-        carry_waypoints, eef_step, jump_threshold, trajectory);
+        carry_waypoints, eef_step, trajectory);
     
     if (fraction > 0.95) {  // Place는 조금 더 관대한 임계값 사용
       RCLCPP_INFO(this->get_logger(), "Carry Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -336,11 +335,10 @@ bool PlaceExecutorNode::approachPlacePosition(const geometry_msgs::msg::Pose & t
     approach_waypoints.push_back(approach_pose2);
 
     moveit_msgs::msg::RobotTrajectory trajectory;
-    const double jump_threshold = 0.0;
     const double eef_step = 0.01;
 
     double fraction = move_group_arm_->computeCartesianPath(
-        approach_waypoints, eef_step, jump_threshold, trajectory);
+        approach_waypoints, eef_step, trajectory);
 
     if (fraction > 0.95) {
       RCLCPP_INFO(this->get_logger(), "Approach Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -430,11 +428,10 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
     retreat_waypoints.push_back(retreat_pose2);
 
     moveit_msgs::msg::RobotTrajectory trajectory;
-    const double jump_threshold = 0.0;
     const double eef_step = 0.01;
 
     double fraction = move_group_arm_->computeCartesianPath(
-        retreat_waypoints, eef_step, jump_threshold, trajectory);
+        retreat_waypoints, eef_step, trajectory);
 
     if (fraction > 0.95) {
       RCLCPP_INFO(this->get_logger(), "Retreat Cartesian path planning successful (%.2f%%)", fraction * 100);
