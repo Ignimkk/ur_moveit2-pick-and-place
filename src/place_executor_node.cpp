@@ -1,5 +1,7 @@
 #include "ur_pick_and_place/place_executor_node.hpp"
 #include <thread>
+#include <algorithm>
+#include <string>
 
 #define PI 3.141592
 
@@ -24,15 +26,12 @@ PlaceExecutorNode::PlaceExecutorNode(const rclcpp::NodeOptions & options)
   // Gripper 클라이언트
   gripper_client_ = this->create_client<ur_pick_and_place::srv::GripperControl>("/gripper/control");
   
-  // Pause/Resume 서비스 설정
-  pause_service_ = this->create_service<std_srvs::srv::Trigger>(
-    "~/pause",
-    std::bind(&PlaceExecutorNode::pauseCallback, this, std::placeholders::_1, std::placeholders::_2));
-  resume_service_ = this->create_service<std_srvs::srv::Trigger>(
-    "~/resume",
-    std::bind(&PlaceExecutorNode::resumeCallback, this, std::placeholders::_1, std::placeholders::_2));
+  // Pause/Resume 토픽 구독자 설정
+  cmd_sub_ = this->create_subscription<std_msgs::msg::String>(
+    "/place_executor_node/cmd", 10,
+    std::bind(&PlaceExecutorNode::cmdCallback, this, std::placeholders::_1));
 
-  RCLCPP_INFO(this->get_logger(), "Place Executor Node initialized with pause/resume support");
+  RCLCPP_INFO(this->get_logger(), "Place Executor Node initialized with topic-based pause/resume support");
 }
 
 void PlaceExecutorNode::setupMoveGroup()
@@ -268,7 +267,7 @@ bool PlaceExecutorNode::moveToPlacePosition(const geometry_msgs::msg::Pose & tar
     const double eef_step = 0.01;
     
     double fraction = move_group_arm_->computeCartesianPath(
-        carry_waypoints, eef_step, trajectory);
+        carry_waypoints, eef_step, 0.0, trajectory);
     
     if (fraction > 0.95) {  // Place는 조금 더 관대한 임계값 사용
       RCLCPP_INFO(this->get_logger(), "Carry Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -338,7 +337,7 @@ bool PlaceExecutorNode::approachPlacePosition(const geometry_msgs::msg::Pose & t
     const double eef_step = 0.01;
 
     double fraction = move_group_arm_->computeCartesianPath(
-        approach_waypoints, eef_step, trajectory);
+        approach_waypoints, eef_step, 0.0, trajectory);
 
     if (fraction > 0.95) {
       RCLCPP_INFO(this->get_logger(), "Approach Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -431,7 +430,7 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
     const double eef_step = 0.01;
 
     double fraction = move_group_arm_->computeCartesianPath(
-        retreat_waypoints, eef_step, trajectory);
+        retreat_waypoints, eef_step, 0.0, trajectory);
 
     if (fraction > 0.95) {
       RCLCPP_INFO(this->get_logger(), "Retreat Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -475,46 +474,33 @@ bool PlaceExecutorNode::retreatFromPlacePosition(const geometry_msgs::msg::Pose 
   } // end while
 }
 
-// Pause/Resume 콜백 함수들
-void PlaceExecutorNode::pauseCallback(
-  const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+// Pause/Resume 토픽 콜백 함수
+void PlaceExecutorNode::cmdCallback(const std_msgs::msg::String::SharedPtr msg)
 {
-  (void)request;
+  std::string cmd = msg->data;
+  // 소문자로 정규화
+  std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
+  
   std::lock_guard<std::mutex> lock(pause_mutex_);
   
-  if (is_paused_) {
-    response->success = false;
-    response->message = "Already paused";
-    RCLCPP_WARN(this->get_logger(), "Pause requested but already paused");
-    return;
+  if (cmd == "pause") {
+    if (is_paused_) {
+      RCLCPP_WARN(this->get_logger(), "Pause requested but already paused");
+      return;
+    }
+    is_paused_ = true;
+    RCLCPP_INFO(this->get_logger(), "Place action paused");
+  } else if (cmd == "resume") {
+    if (!is_paused_) {
+      RCLCPP_WARN(this->get_logger(), "Resume requested but not paused");
+      return;
+    }
+    is_paused_ = false;
+    is_resuming_ = true;
+    RCLCPP_INFO(this->get_logger(), "Place action resumed");
+  } else {
+    RCLCPP_WARN(this->get_logger(), "Unknown command: '%s'. Expected 'pause' or 'resume'", msg->data.c_str());
   }
-  
-  is_paused_ = true;
-  response->success = true;
-  response->message = "Place action paused";
-  RCLCPP_INFO(this->get_logger(), "Place action paused");
-}
-
-void PlaceExecutorNode::resumeCallback(
-  const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
-{
-  (void)request;
-  std::lock_guard<std::mutex> lock(pause_mutex_);
-  
-  if (!is_paused_) {
-    response->success = false;
-    response->message = "Not paused";
-    RCLCPP_WARN(this->get_logger(), "Resume requested but not paused");
-    return;
-  }
-  
-  is_paused_ = false;
-  is_resuming_ = true;
-  response->success = true;
-  response->message = "Place action resumed";
-  RCLCPP_INFO(this->get_logger(), "Place action resumed");
 }
 
 void PlaceExecutorNode::checkPauseAndWait()
@@ -614,7 +600,7 @@ int main(int argc, char * argv[])
   rclcpp::init(argc, argv);
   auto node = std::make_shared<ur_pick_and_place::PlaceExecutorNode>();
   
-  // MultiThreadedExecutor 사용 - pause/resume service callback이 동시에 처리되어야 함
+  // MultiThreadedExecutor 사용
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(node);
   executor.spin();

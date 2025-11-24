@@ -122,11 +122,13 @@ ament_target_dependencies(pick_place_manager_node
 ament_target_dependencies(ready_executor_node
   rclcpp
   moveit_ros_planning_interface
+  tf2_geometry_msgs
   geometry_msgs
   moveit_core
   moveit_msgs
   Eigen3
   std_srvs
+  std_msgs
 )
 
 # Set include directories for modular node executables

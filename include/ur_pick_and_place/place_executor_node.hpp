@@ -6,9 +6,9 @@
 #include <ur_pick_and_place/action/place.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <ur_pick_and_place/srv/gripper_control.hpp>
-#include <std_srvs/srv/trigger.hpp>
-#include <moveit/move_group_interface/move_group_interface.hpp>
-#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <memory>
@@ -43,8 +43,7 @@ private:
   std::unique_ptr<moveit::planning_interface::PlanningSceneInterface> planning_scene_interface_;
   
   // Pause/Resume 관련
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub_;
   std::atomic<bool> is_paused_{false};
   std::atomic<bool> is_resuming_{false};
   PlaceStep paused_step_{PlaceStep::IDLE};
@@ -67,12 +66,7 @@ private:
   bool retreatFromPlacePosition(const geometry_msgs::msg::Pose & target_pose);
   
   // Pause/Resume 관련 함수
-  void pauseCallback(
-    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
-  void resumeCallback(
-    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  void cmdCallback(const std_msgs::msg::String::SharedPtr msg);
   bool executeTrajectoryWithPause(
     const moveit_msgs::msg::RobotTrajectory & trajectory,
     PlaceStep current_step);

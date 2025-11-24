@@ -7,8 +7,8 @@
 #include <ur_pick_and_place/action/place.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <std_msgs/msg/string.hpp>
-#include <memory>
 #include <std_srvs/srv/trigger.hpp>
+#include <memory>
 
 namespace ur_pick_and_place
 {
@@ -44,27 +44,18 @@ private:
 
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_client_;
   
-  // Pause/Resume 통합 제어
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr pause_service_;
-  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr resume_service_;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr pick_pause_client_;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr pick_resume_client_;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr place_pause_client_;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr place_resume_client_;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_pause_client_;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr ready_resume_client_;
+  // Pause/Resume 토픽 기반 제어
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr cmd_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pick_cmd_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr place_cmd_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr ready_cmd_pub_;
   ExecutionState current_state_{ExecutionState::IDLE};
   
   void initializeHardcodedPlaceGoal();
   void pickGoalCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   
-  // Pause/Resume 콜백
-  void pauseCallback(
-    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
-  void resumeCallback(
-    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
-    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  // Pause/Resume 토픽 콜백
+  void cmdCallback(const std_msgs::msg::String::SharedPtr msg);
   
   void executePickAndPlaceSequence();
   void sendPickGoal();

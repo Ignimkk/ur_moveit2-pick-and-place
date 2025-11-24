@@ -1,7 +1,7 @@
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
-#include <moveit/move_group_interface/move_group_interface.hpp>
-#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
+#include <moveit/move_group_interface/move_group_interface.h>
+#include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -180,7 +180,7 @@ int main(int argc, char * argv[])
   const double eef_step = 0.01;
 
   double fraction = move_group_arm.computeCartesianPath(
-      approach_waypoints1, eef_step, trajectory_approach1);
+      approach_waypoints1, eef_step, 0.0, trajectory_approach1);
 
   if (fraction > 0.98) {
     RCLCPP_INFO(LOGGER, "Approach Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -208,7 +208,7 @@ int main(int argc, char * argv[])
   moveit_msgs::msg::RobotTrajectory trajectory_retreat1;
 
   fraction = move_group_arm.computeCartesianPath(
-      retreat_waypoints1, eef_step, trajectory_retreat1);
+      retreat_waypoints1, eef_step, 0.0, trajectory_retreat1);
 
   if (fraction > 0.98) {
     RCLCPP_INFO(LOGGER, "Retreat Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -232,7 +232,7 @@ int main(int argc, char * argv[])
   moveit_msgs::msg::RobotTrajectory trajectory_carry;
 
   fraction = move_group_arm.computeCartesianPath(
-      carry_waypoints, eef_step, trajectory_carry);
+      carry_waypoints, eef_step, 0.0, trajectory_carry);
 
   if (fraction > 0.98) {
     RCLCPP_INFO(LOGGER, "Carry Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -269,7 +269,7 @@ int main(int argc, char * argv[])
   moveit_msgs::msg::RobotTrajectory trajectory_approach2;
 
   fraction = move_group_arm.computeCartesianPath(
-      approach_waypoints2, eef_step, trajectory_approach2);
+      approach_waypoints2, eef_step, 0.0, trajectory_approach2);
 
   if (fraction > 0.98) {
     RCLCPP_INFO(LOGGER, "Place approach Cartesian path planning successful (%.2f%%)", fraction * 100);
@@ -297,7 +297,7 @@ int main(int argc, char * argv[])
   moveit_msgs::msg::RobotTrajectory trajectory_retreat2;
 
   fraction = move_group_arm.computeCartesianPath(
-      retreat_waypoints2, eef_step, trajectory_retreat2);
+      retreat_waypoints2, eef_step, 0.0, trajectory_retreat2);
 
   if (fraction > 0.98) {
     RCLCPP_INFO(LOGGER, "Place retreat Cartesian path planning successful (%.2f%%)", fraction * 100);
